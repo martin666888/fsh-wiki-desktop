@@ -10,6 +10,9 @@ use tauri::webview::{Color, WebviewBuilder};
 const TAB_BAR_HEIGHT: f64 = 42.0;
 const DEFAULT_URL: &str = "https://www.feishu.cn/drive/home/";
 const INIT_JS: &str = include_str!("init.js");
+// 设置窗尺寸：居中定位与建窗必须共用同一组值，否则双屏下窗口位置会漂
+const SETTINGS_W: f64 = 430.0;
+const SETTINGS_H: f64 = 480.0;
 
 // 所有运行数据（WebView 缓存、登录态、字体配置）都收进安装目录下的 data/，
 // 不散到 AppData：删安装目录即删干净
@@ -146,6 +149,13 @@ fn get_font_config() -> FontConfig {
     load_font_config()
 }
 
+// 取应用版本号给「关于」页显示。用 package_info 而不是 env!("CARGO_PKG_VERSION")：
+// 前者来自 tauri.conf.json 编译进去的版本，也就是 updater 比对时用的那个，保证一致。
+#[tauri::command]
+fn app_version(app: AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
 #[tauri::command]
 fn set_font_config(app: AppHandle, config: FontConfig) -> Result<(), String> {
     let path = font_config_path();
@@ -167,7 +177,7 @@ async fn open_settings(app: AppHandle) {
         let scale = main.scale_factor().ok()?;
         let outer = main.outer_position().ok()?;
         let size = main.outer_size().ok()?;
-        let (w, h) = (430.0 * scale, 440.0 * scale);
+        let (w, h) = (SETTINGS_W * scale, SETTINGS_H * scale);
         Some((
             (outer.x as f64 + (size.width as f64 - w) / 2.0) / scale,
             (outer.y as f64 + (size.height as f64 - h) / 2.0) / scale,
@@ -186,8 +196,8 @@ async fn open_settings(app: AppHandle) {
         "settings",
         WebviewUrl::App("settings.html".into()),
     )
-    .title("显示字体设置")
-    .inner_size(430.0, 440.0)
+    .title("设置")
+    .inner_size(SETTINGS_W, SETTINGS_H)
     .resizable(false)
     .data_directory(data_dir().join("webview"));
     if let Some((x, y)) = pos {
@@ -453,6 +463,7 @@ pub fn run() {
             list_tabs,
             list_fonts,
             get_font_config,
+            app_version,
             set_font_config,
             open_settings
         ])
