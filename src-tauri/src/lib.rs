@@ -11,6 +11,15 @@ const TAB_BAR_HEIGHT: f64 = 42.0;
 const DEFAULT_URL: &str = "https://www.feishu.cn/drive/home/";
 const INIT_JS: &str = include_str!("init.js");
 
+// 所有运行数据（WebView 缓存、登录态、字体配置）都收进安装目录下的 data/，
+// 不散到 AppData：删安装目录即删干净
+fn data_dir() -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("data")))
+        .unwrap_or_else(|| PathBuf::from("data"))
+}
+
 pub struct TabState {
     counter: AtomicUsize,
     tabs: Mutex<Vec<String>>,
@@ -86,15 +95,12 @@ fn quote_family(name: &str, fallback: &str) -> String {
     }
 }
 
-fn font_config_path(app: &AppHandle) -> Option<PathBuf> {
-    app.path().app_config_dir().ok().map(|d| d.join("fonts.json"))
+fn font_config_path() -> PathBuf {
+    data_dir().join("fonts.json")
 }
 
-fn load_font_config(app: &AppHandle) -> FontConfig {
-    let Some(path) = font_config_path(app) else {
-        return FontConfig::default();
-    };
-    fs::read_to_string(path)
+fn load_font_config() -> FontConfig {
+    fs::read_to_string(font_config_path())
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default()
@@ -109,7 +115,7 @@ fn font_apply_js(cfg: &FontConfig) -> String {
 }
 
 fn apply_font_config(app: &AppHandle) {
-    let cfg = load_font_config(app);
+    let cfg = load_font_config();
     let js = font_apply_js(&cfg);
     for wv in app.webviews().values() {
         if wv.label().starts_with("tab-") {
@@ -127,19 +133,17 @@ fn list_fonts() -> Vec<String> {
 }
 
 #[tauri::command]
-fn get_font_config(app: AppHandle) -> FontConfig {
-    load_font_config(&app)
+fn get_font_config() -> FontConfig {
+    load_font_config()
 }
 
 #[tauri::command]
 fn set_font_config(app: AppHandle, config: FontConfig) -> Result<(), String> {
-    let Some(dir) = font_config_path(&app) else {
-        return Err("config dir unavailable".into());
-    };
-    if let Some(parent) = dir.parent() {
+    let path = font_config_path();
+    if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    fs::write(&dir, serde_json::to_string_pretty(&config).unwrap_or_default())
+    fs::write(&path, serde_json::to_string_pretty(&config).unwrap_or_default())
         .map_err(|e| e.to_string())?;
     apply_font_config(&app);
     Ok(())
@@ -175,7 +179,8 @@ async fn open_settings(app: AppHandle) {
     )
     .title("显示字体设置")
     .inner_size(430.0, 440.0)
-    .resizable(false);
+    .resizable(false)
+    .data_directory(data_dir().join("webview"));
     if let Some((x, y)) = pos {
         builder = builder.position(x, y);
     }
@@ -264,13 +269,13 @@ fn spawn_tab(app: &AppHandle, url: &str) -> Result<String, String> {
     let n = state.counter.fetch_add(1, Ordering::SeqCst);
     let label = format!("tab-{n}");
 
-    let font_app = app.clone();
     let builder = WebviewBuilder::new(&label, WebviewUrl::External(parsed))
         .background_color(Color(255, 255, 255, 255))
+        .data_directory(data_dir().join("webview"))
         .initialization_script(INIT_JS)
-        .on_page_load(move |webview, payload| {
+        .on_page_load(|webview, payload| {
             if let tauri::webview::PageLoadEvent::Finished = payload.event() {
-                let cfg = load_font_config(&font_app);
+                let cfg = load_font_config();
                 if cfg.enabled {
                     let _ = webview.eval(&font_apply_js(&cfg));
                 }
@@ -419,7 +424,8 @@ pub fn run() {
                 )
             };
             let ui_builder = WebviewBuilder::new("ui", WebviewUrl::App("index.html".into()))
-                .background_color(Color(232, 234, 237, 255));
+                .background_color(Color(232, 234, 237, 255))
+                .data_directory(data_dir().join("webview"));
             let ui = window.add_child(ui_builder, bar_pos, bar_size)?;
             let _ = ui.set_focus();
 

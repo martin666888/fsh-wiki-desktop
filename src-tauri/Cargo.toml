@@ -1,6 +1,6 @@
 [package]
 name = "feishu-desktop"
-version = "0.1.0"
+version = "0.1.1"
 description = "飞书文档轻量桌面客户端"
 edition = "2021"
 
