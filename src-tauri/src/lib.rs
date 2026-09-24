@@ -199,6 +199,10 @@ async fn open_settings(app: AppHandle) {
     .title("设置")
     .inner_size(SETTINGS_W, SETTINGS_H)
     .resizable(false)
+    // 设置是独立的顶层窗口，Windows 会给每个顶层窗口一个任务栏按钮，
+    // 于是任务栏会同时出现主窗口和设置两个图标。这里跳过任务栏，
+    // 让它表现得像主窗口里的一个附属面板。
+    .skip_taskbar(true)
     .data_directory(data_dir().join("webview"));
     if let Some((x, y)) = pos {
         builder = builder.position(x, y);
