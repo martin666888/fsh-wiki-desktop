@@ -1,5 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import {
+  DEFAULT_PREFS,
+  downloadPercent,
+  statusDetail,
+  statusTitle,
+  type UpdatePrefs,
+  type UpdateStatus,
+} from "./update";
 
 interface FontConfig {
   enabled: boolean;
@@ -127,6 +136,8 @@ export default function Settings() {
   const [fonts, setFonts] = useState<string[]>([]);
   const [cfg, setCfg] = useState<FontConfig>(DEFAULT_CFG);
   const [version, setVersion] = useState("");
+  const [status, setStatus] = useState<UpdateStatus>({ kind: "idle" });
+  const [prefs, setPrefs] = useState<UpdatePrefs>(DEFAULT_PREFS);
 
   const tabRefs = useRef<Record<TabKey, HTMLButtonElement | null>>({
     font: null,
@@ -143,6 +154,39 @@ export default function Settings() {
     invoke<string>("app_version")
       .then(setVersion)
       .catch(console.error);
+    invoke<UpdateStatus>("get_update_status")
+      .then(setStatus)
+      .catch(console.error);
+    invoke<UpdatePrefs>("get_update_prefs")
+      .then((p) => setPrefs({ ...DEFAULT_PREFS, ...p }))
+      .catch(console.error);
+
+    // 主界面点 ⚙ 时如果带了 tab，这里接住
+    invoke<string | null>("take_settings_tab")
+      .then((t) => {
+        if (t === "font" || t === "about") setTab(t);
+      })
+      .catch(console.error);
+
+    const unlisteners: Array<() => void> = [];
+    let disposed = false;
+    const track = (p: Promise<() => void>) =>
+      p.then((fn) => {
+        if (disposed) fn();
+        else unlisteners.push(fn);
+      });
+
+    track(listen<UpdateStatus>("update-status", (e) => setStatus(e.payload)));
+    track(
+      listen<string>("settings-tab", (e) => {
+        if (e.payload === "font" || e.payload === "about") setTab(e.payload);
+      }),
+    );
+
+    return () => {
+      disposed = true;
+      unlisteners.forEach((fn) => fn());
+    };
   }, []);
 
   const selectTab = (key: TabKey, focus = false) => {
@@ -160,13 +204,62 @@ export default function Settings() {
     selectTab(next.key, true);
   };
 
-  const save = (next: FontConfig) => {
+  const saveFont = (next: FontConfig) => {
     setCfg(next);
     invoke("set_font_config", { config: next }).catch(console.error);
   };
 
+  const savePrefs = (next: UpdatePrefs) => {
+    setPrefs(next);
+    invoke("set_update_prefs", { prefs: next }).catch(console.error);
+  };
+
   const bodyChain = [cfg.en, cfg.cn].filter(Boolean).join(", ");
   const monoChain = [cfg.mono].filter(Boolean).join(", ");
+  const percent = downloadPercent(status);
+
+  const updateAction = () => {
+    switch (status.kind) {
+      case "available":
+        return (
+          <button
+            className="btn primary"
+            onClick={() => invoke("download_update").catch(console.error)}
+          >
+            下载更新
+          </button>
+        );
+      case "downloaded":
+        return (
+          <button
+            className="btn primary"
+            onClick={() =>
+              invoke("install_update").catch((e) =>
+                setStatus({ kind: "error", message: String(e) }),
+              )
+            }
+          >
+            重启并安装
+          </button>
+        );
+      case "checking":
+      case "downloading":
+        return (
+          <button className="btn" disabled>
+            请稍候
+          </button>
+        );
+      default:
+        return (
+          <button
+            className="btn"
+            onClick={() => invoke("check_update").catch(console.error)}
+          >
+            检查更新
+          </button>
+        );
+    }
+  };
 
   return (
     <div className="shell">
@@ -211,7 +304,7 @@ export default function Settings() {
               </div>
               <Toggle
                 checked={cfg.enabled}
-                onChange={(v) => save({ ...cfg, enabled: v })}
+                onChange={(v) => saveFont({ ...cfg, enabled: v })}
               />
             </div>
           </div>
@@ -223,7 +316,7 @@ export default function Settings() {
                 value={cfg.en}
                 fonts={fonts}
                 disabled={!cfg.enabled}
-                onChange={(v) => save({ ...cfg, en: v })}
+                onChange={(v) => saveFont({ ...cfg, en: v })}
               />
             </div>
             <div className="row">
@@ -232,7 +325,7 @@ export default function Settings() {
                 value={cfg.cn}
                 fonts={fonts}
                 disabled={!cfg.enabled}
-                onChange={(v) => save({ ...cfg, cn: v })}
+                onChange={(v) => saveFont({ ...cfg, cn: v })}
               />
             </div>
             <div className="row">
@@ -241,7 +334,7 @@ export default function Settings() {
                 value={cfg.mono}
                 fonts={fonts}
                 disabled={!cfg.enabled}
-                onChange={(v) => save({ ...cfg, mono: v })}
+                onChange={(v) => saveFont({ ...cfg, mono: v })}
               />
             </div>
             <div className="row prev-row">
@@ -259,7 +352,7 @@ export default function Settings() {
           <div className="pg-foot">
             <button
               className="link-btn"
-              onClick={() => save({ ...DEFAULT_CFG, enabled: false })}
+              onClick={() => saveFont({ ...DEFAULT_CFG, enabled: false })}
             >
               恢复默认
             </button>
@@ -272,10 +365,60 @@ export default function Settings() {
           id="spanel-about"
           aria-labelledby="stab-about"
         >
+          <div className="pg-head">
+            <h1>关于</h1>
+            <p>飞书文档轻客户端</p>
+          </div>
+
           <div className="grp">
             <div className="row">
-              <span className="row-t">版本</span>
-              <span className="row-v">{version || "读取中…"}</span>
+              <span className="row-t">当前版本</span>
+              <span className="row-v">{version || "…"}</span>
+            </div>
+          </div>
+
+          <div className="grp">
+            <div className="row">
+              <div className="row-txt">
+                <span className="row-t">{statusTitle(status)}</span>
+                {statusDetail(status) && (
+                  <span className="row-d">{statusDetail(status)}</span>
+                )}
+              </div>
+              {updateAction()}
+            </div>
+            {status.kind === "downloading" && (
+              <div className="row prog-row">
+                <div className="prog">
+                  <div
+                    className="prog-bar"
+                    style={{ width: percent === null ? "0%" : `${percent}%` }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="grp">
+            <div className="row">
+              <div className="row-txt">
+                <span className="row-t">启动时检查更新</span>
+                <span className="row-d">打开应用时在后台问一次有没有新版本</span>
+              </div>
+              <Toggle
+                checked={prefs.autoCheck}
+                onChange={(v) => savePrefs({ ...prefs, autoCheck: v })}
+              />
+            </div>
+            <div className="row">
+              <div className="row-txt">
+                <span className="row-t">发现新版本后自动下载</span>
+                <span className="row-d">下载完不会自动装，仍要你点一次安装</span>
+              </div>
+              <Toggle
+                checked={prefs.autoDownload}
+                onChange={(v) => savePrefs({ ...prefs, autoDownload: v })}
+              />
             </div>
           </div>
         </div>

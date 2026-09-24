@@ -168,9 +168,24 @@ fn set_font_config(app: AppHandle, config: FontConfig) -> Result<(), String> {
     Ok(())
 }
 
+// 主界面点 ⚙ 时希望直接落在哪个 tab（有更新时落到「关于」）。
+// 设置窗可能还没建，所以先把目标存下来，等页面挂载时取走。
+#[derive(Default)]
+struct SettingsNav(Mutex<Option<String>>);
+
+#[tauri::command]
+fn take_settings_tab(app: AppHandle) -> Option<String> {
+    app.state::<SettingsNav>().0.lock().unwrap().take()
+}
+
 // 必须 async：同步命令在主线程重入创建 WebView2 控制器会产出空白 WebView
 #[tauri::command]
-async fn open_settings(app: AppHandle) {
+async fn open_settings(app: AppHandle, tab: Option<String>) {
+    *app.state::<SettingsNav>().0.lock().unwrap() = tab.clone();
+    if tab.is_some() {
+        let _ = app.emit("settings-tab", tab);
+    }
+
     // 设置窗要落在主窗口中心：Tauri 新窗口默认位置与主显示器绑定，
     // 双屏下会跑到左屏原点，必须按主窗口外框坐标手动算
     let pos = app.get_window("main").and_then(|main| {
@@ -414,38 +429,323 @@ fn list_tabs(app: AppHandle) -> TabsSnapshot {
     TabsSnapshot { tabs, active }
 }
 
-// 启动时检查更新：有新版就下载 → 验签 → 跑 NSIS 安装器 → 自动重启。
+// ---------------- 更新 ----------------
 //
-// Windows 上 download_and_install 在启动安装器后会自己 std::process::exit(0)
-// （插件内部行为，见 tauri-plugin-updater/src/updater.rs），安装器再带 /R 把应用拉起来，
-// 所以这里不需要手动 restart。
-// 默认 installMode = passive：NSIS 以 /P /UPDATE /R 运行，只显示进度条、不弹交互。
-//
-// 只在 release 构建启用：dev 跑的是 debug 版，同样会去拉线上 release，没必要。
-#[cfg(not(debug_assertions))]
-fn spawn_update_check(app: AppHandle) {
+// 刻意拆成三段，且安装永远由用户触发：
+//   check（检查） → download（下载） → install（安装）
+// 检查与下载可以由偏好设置自动进行，安装不行：install() 在 Windows 上会启动 NSIS
+// 安装器然后 std::process::exit(0)（插件内部行为，见 tauri-plugin-updater/src/updater.rs），
+// 应用会被结束、安装器再带 /R 把它拉起来。所以这一步必须由用户明确点。
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+struct UpdatePrefs {
+    /// 启动时自动检查
+    auto_check: bool,
+    /// 发现新版本后自动下载（下载完仍然等用户点安装）
+    auto_download: bool,
+}
+
+impl Default for UpdatePrefs {
+    fn default() -> Self {
+        Self {
+            auto_check: true,
+            auto_download: false,
+        }
+    }
+}
+
+#[derive(Clone, Serialize, Default)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+enum UpdateStatus {
+    #[default]
+    Idle,
+    Checking,
+    UpToDate {
+        checked_at: i64,
+    },
+    Available {
+        version: String,
+    },
+    Downloading {
+        version: String,
+        received: u64,
+        total: Option<u64>,
+    },
+    Downloaded {
+        version: String,
+    },
+    Error {
+        message: String,
+    },
+}
+
+#[derive(Default)]
+struct UpdateState {
+    status: Mutex<UpdateStatus>,
+    /// 检查到的更新对象，留着给后面的下载 / 安装用
+    pending: Mutex<Option<tauri_plugin_updater::Update>>,
+    /// 已下载到本地的安装包：(版本, 路径)
+    pending_file: Mutex<Option<(String, PathBuf)>>,
+    prefs: Mutex<UpdatePrefs>,
+}
+
+fn now_millis() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn update_prefs_path() -> PathBuf {
+    data_dir().join("updates.json")
+}
+
+fn update_cache_dir() -> PathBuf {
+    data_dir().join("update")
+}
+
+fn load_update_prefs() -> UpdatePrefs {
+    fs::read_to_string(update_prefs_path())
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn save_update_prefs(prefs: &UpdatePrefs) -> Result<(), String> {
+    let path = update_prefs_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::write(&path, serde_json::to_string_pretty(prefs).unwrap_or_default())
+        .map_err(|e| e.to_string())
+}
+
+fn emit_update_status(app: &AppHandle) {
+    let status = app.state::<UpdateState>().status.lock().unwrap().clone();
+    let _ = app.emit("update-status", status);
+}
+
+fn set_update_status(app: &AppHandle, status: UpdateStatus) {
+    *app.state::<UpdateState>().status.lock().unwrap() = status;
+    emit_update_status(app);
+}
+
+fn update_is_busy(app: &AppHandle) -> bool {
+    matches!(
+        *app.state::<UpdateState>().status.lock().unwrap(),
+        UpdateStatus::Checking | UpdateStatus::Downloading { .. }
+    )
+}
+
+/// 扫已下载但还没安装的安装包。版本等于当前版本说明早前已装成功，直接清掉。
+fn scan_pending_installer(current: &str) -> Option<(String, PathBuf)> {
+    let dir = update_cache_dir();
+    let mut found: Option<(String, PathBuf)> = None;
+    for entry in fs::read_dir(&dir).ok()?.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        let Some(version) = name
+            .strip_prefix("pending-")
+            .and_then(|s| s.strip_suffix(".exe"))
+        else {
+            continue;
+        };
+        if version == current {
+            let _ = fs::remove_file(entry.path());
+            continue;
+        }
+        if found.is_some() {
+            let _ = fs::remove_file(entry.path());
+            continue;
+        }
+        found = Some((version.to_string(), entry.path()));
+    }
+    found
+}
+
+fn store_pending_installer(version: &str, bytes: &[u8]) -> Result<PathBuf, String> {
+    let dir = update_cache_dir();
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    // 只保留一份，避免历史版本堆积
+    if let Ok(entries) = fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+    let path = dir.join(format!("pending-{version}.exe"));
+    fs::write(&path, bytes).map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
+#[tauri::command]
+fn get_update_status(app: AppHandle) -> UpdateStatus {
+    app.state::<UpdateState>().status.lock().unwrap().clone()
+}
+
+#[tauri::command]
+fn get_update_prefs(app: AppHandle) -> UpdatePrefs {
+    app.state::<UpdateState>().prefs.lock().unwrap().clone()
+}
+
+#[tauri::command]
+fn set_update_prefs(app: AppHandle, prefs: UpdatePrefs) {
+    *app.state::<UpdateState>().prefs.lock().unwrap() = prefs.clone();
+    let _ = save_update_prefs(&prefs);
+}
+
+#[tauri::command]
+async fn check_update(app: AppHandle) {
     use tauri_plugin_updater::UpdaterExt;
 
-    tauri::async_runtime::spawn(async move {
-        let updater = match app.updater() {
-            Ok(u) => u,
-            Err(e) => {
-                eprintln!("[updater] 初始化失败: {e}");
-                return;
-            }
-        };
-        match updater.check().await {
-            Ok(Some(update)) => {
-                eprintln!(
-                    "[updater] 发现新版本 {}（当前 {}），开始下载",
-                    update.version, update.current_version
-                );
-                if let Err(e) = update.download_and_install(|_, _| {}, || {}).await {
-                    eprintln!("[updater] 下载或安装失败: {e}");
+    if update_is_busy(&app) {
+        return;
+    }
+    set_update_status(&app, UpdateStatus::Checking);
+
+    let updater = match app.updater() {
+        Ok(u) => u,
+        Err(e) => {
+            set_update_status(&app, UpdateStatus::Error { message: e.to_string() });
+            return;
+        }
+    };
+
+    match updater.check().await {
+        Ok(Some(update)) => {
+            let version = update.version.clone();
+            *app.state::<UpdateState>().pending.lock().unwrap() = Some(update);
+            set_update_status(&app, UpdateStatus::Available { version });
+        }
+        Ok(None) => {
+            *app.state::<UpdateState>().pending.lock().unwrap() = None;
+            set_update_status(&app, UpdateStatus::UpToDate { checked_at: now_millis() });
+        }
+        Err(e) => set_update_status(&app, UpdateStatus::Error { message: e.to_string() }),
+    }
+}
+
+#[tauri::command]
+async fn download_update(app: AppHandle) {
+    if update_is_busy(&app) {
+        return;
+    }
+    let Some(update) = app.state::<UpdateState>().pending.lock().unwrap().clone() else {
+        return;
+    };
+
+    let version = update.version.clone();
+    set_update_status(
+        &app,
+        UpdateStatus::Downloading {
+            version: version.clone(),
+            received: 0,
+            total: None,
+        },
+    );
+
+    let progress_app = app.clone();
+    let progress_version = version.clone();
+    let mut last_percent: i64 = -1;
+    let result = update
+        .download(
+            move |received, total| {
+                let percent = match total {
+                    Some(t) if t > 0 => received as i64 * 100 / t as i64,
+                    _ => -1,
+                };
+                if percent == last_percent {
+                    return;
                 }
+                last_percent = percent;
+                set_update_status(
+                    &progress_app,
+                    UpdateStatus::Downloading {
+                        version: progress_version.clone(),
+                        received: received as u64,
+                        total,
+                    },
+                );
+            },
+            || {},
+        )
+        .await;
+
+    match result {
+        Ok(bytes) => match store_pending_installer(&version, &bytes) {
+            Ok(path) => {
+                *app.state::<UpdateState>().pending_file.lock().unwrap() =
+                    Some((version.clone(), path));
+                set_update_status(&app, UpdateStatus::Downloaded { version });
             }
-            Ok(None) => {}
-            Err(e) => eprintln!("[updater] 检查更新失败: {e}"),
+            Err(e) => set_update_status(&app, UpdateStatus::Error { message: e }),
+        },
+        Err(e) => set_update_status(&app, UpdateStatus::Error { message: e.to_string() }),
+    }
+}
+
+/// 运行安装器。Windows 上这一步会结束当前进程，安装器随后带 /R 把应用重新拉起。
+#[tauri::command]
+async fn install_update(app: AppHandle) -> Result<(), String> {
+    use tauri_plugin_updater::UpdaterExt;
+
+    let (_, path) = app
+        .state::<UpdateState>()
+        .pending_file
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or("没有已下载的更新")?;
+    let bytes = fs::read(&path).map_err(|e| e.to_string())?;
+
+    // install() 要用 Update 里的安装参数，所以得有一个 Update 对象。
+    // 进程重启过的话内存里没有，重新检查一次拿一个。
+    //
+    // 注意先把克隆值绑定出来再 match：如果直接在 match 的匹配表达式里 lock()，
+    // 那个锁守卫会一直活到整个 match 结束（含下面的 .await），future 就不是 Send 了。
+    let cached = app.state::<UpdateState>().pending.lock().unwrap().clone();
+    let update = match cached {
+        Some(u) => u,
+        None => {
+            let updater = app.updater().map_err(|e| e.to_string())?;
+            updater
+                .check()
+                .await
+                .map_err(|e| e.to_string())?
+                .ok_or("远端已没有可用的更新")?
+        }
+    };
+
+    update.install(bytes).map_err(|e| e.to_string())
+}
+
+/// 进程重启后，把上次已经下载好的安装包重新呈现为「已下载」状态。
+fn restore_pending_on_boot(app: &AppHandle) {
+    let current = app.package_info().version.to_string();
+    if let Some((version, path)) = scan_pending_installer(&current) {
+        *app.state::<UpdateState>().pending_file.lock().unwrap() = Some((version.clone(), path));
+        set_update_status(app, UpdateStatus::Downloaded { version });
+    }
+}
+
+/// 启动时的自动流程：只有「检查」和「下载」会自己跑，安装永远等用户点。
+/// 只在 release 构建启用：dev 跑的是 debug 版，没必要去拉线上 release。
+#[cfg(not(debug_assertions))]
+fn spawn_update_boot(app: AppHandle) {
+    let prefs = app.state::<UpdateState>().prefs.lock().unwrap().clone();
+    if !prefs.auto_check {
+        return;
+    }
+
+    tauri::async_runtime::spawn(async move {
+        check_update(app.clone()).await;
+
+        let auto_download = app.state::<UpdateState>().prefs.lock().unwrap().auto_download;
+        let available = matches!(
+            *app.state::<UpdateState>().status.lock().unwrap(),
+            UpdateStatus::Available { .. }
+        );
+        if auto_download && available {
+            download_update(app.clone()).await;
         }
     });
 }
@@ -454,6 +754,11 @@ fn spawn_update_check(app: AppHandle) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(UpdateState {
+            prefs: Mutex::new(load_update_prefs()),
+            ..Default::default()
+        })
+        .manage(SettingsNav::default())
         .manage(TabState {
             counter: AtomicUsize::new(1),
             tabs: Mutex::new(Vec::new()),
@@ -469,7 +774,14 @@ pub fn run() {
             get_font_config,
             app_version,
             set_font_config,
-            open_settings
+            open_settings,
+            take_settings_tab,
+            get_update_status,
+            get_update_prefs,
+            set_update_prefs,
+            check_update,
+            download_update,
+            install_update
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -542,8 +854,11 @@ pub fn run() {
                 }
             });
 
+            // 上次已下载但没安装的包，重启后照旧呈现为「已下载」（dev 也走，方便调试）
+            restore_pending_on_boot(&handle);
+
             #[cfg(not(debug_assertions))]
-            spawn_update_check(handle.clone());
+            spawn_update_boot(handle.clone());
 
             Ok(())
         })

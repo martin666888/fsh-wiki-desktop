@@ -115,6 +115,7 @@ body,
 }
 
 .settings-btn {
+  position: relative;
   flex: 0 0 auto;
   display: flex;
   align-items: center;
@@ -132,6 +133,19 @@ body,
 
 .settings-btn:hover {
   background: #dcdfe3;
+}
+
+/* 有待处理的更新时在 ⚙ 上点一个小提示点 */
+.settings-btn.dot::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #0067c0;
+  box-shadow: 0 0 0 1.5px #e8eaed;
 }
 
 .wctrl {

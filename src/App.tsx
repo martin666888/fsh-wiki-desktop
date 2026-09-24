@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { needsAttention, type UpdateStatus } from "./update";
 import "./App.css";
 
 const DEFAULT_URL = "https://www.feishu.cn/drive/home/";
@@ -15,6 +16,7 @@ export default function App() {
   const [tabs, setTabs] = useState<TabInfo[]>([]);
   const [active, setActive] = useState<string | null>(null);
   const [maximized, setMaximized] = useState(false);
+  const [updateReady, setUpdateReady] = useState(false);
 
   useEffect(() => {
     const win = getCurrentWindow();
@@ -84,6 +86,16 @@ export default function App() {
         if (snap.active) setActive(snap.active);
       })
       .catch(console.error);
+
+    // 有更新可处理时在 ⚙ 上显示提示点
+    invoke<UpdateStatus>("get_update_status")
+      .then((s) => setUpdateReady(needsAttention(s)))
+      .catch(console.error);
+    track(
+      listen<UpdateStatus>("update-status", (e) =>
+        setUpdateReady(needsAttention(e.payload)),
+      ),
+    );
 
     return () => {
       disposed = true;
@@ -165,9 +177,13 @@ export default function App() {
           </svg>
         </button>
         <button
-          className="settings-btn"
-          onClick={() => invoke("open_settings").catch(console.error)}
-          title="显示字体设置"
+          className={`settings-btn ${updateReady ? "dot" : ""}`}
+          onClick={() =>
+            invoke("open_settings", {
+              tab: updateReady ? "about" : "font",
+            }).catch(console.error)
+          }
+          title={updateReady ? "有新版本可更新" : "设置"}
         >
           <svg
             width="13"
