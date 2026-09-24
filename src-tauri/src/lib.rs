@@ -400,9 +400,46 @@ fn list_tabs(app: AppHandle) -> TabsSnapshot {
     TabsSnapshot { tabs, active }
 }
 
+// 启动时检查更新：有新版就下载 → 验签 → 跑 NSIS 安装器 → 自动重启。
+//
+// Windows 上 download_and_install 在启动安装器后会自己 std::process::exit(0)
+// （插件内部行为，见 tauri-plugin-updater/src/updater.rs），安装器再带 /R 把应用拉起来，
+// 所以这里不需要手动 restart。
+// 默认 installMode = passive：NSIS 以 /P /UPDATE /R 运行，只显示进度条、不弹交互。
+//
+// 只在 release 构建启用：dev 跑的是 debug 版，同样会去拉线上 release，没必要。
+#[cfg(not(debug_assertions))]
+fn spawn_update_check(app: AppHandle) {
+    use tauri_plugin_updater::UpdaterExt;
+
+    tauri::async_runtime::spawn(async move {
+        let updater = match app.updater() {
+            Ok(u) => u,
+            Err(e) => {
+                eprintln!("[updater] 初始化失败: {e}");
+                return;
+            }
+        };
+        match updater.check().await {
+            Ok(Some(update)) => {
+                eprintln!(
+                    "[updater] 发现新版本 {}（当前 {}），开始下载",
+                    update.version, update.current_version
+                );
+                if let Err(e) = update.download_and_install(|_, _| {}, || {}).await {
+                    eprintln!("[updater] 下载或安装失败: {e}");
+                }
+            }
+            Ok(None) => {}
+            Err(e) => eprintln!("[updater] 检查更新失败: {e}"),
+        }
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(TabState {
             counter: AtomicUsize::new(1),
             tabs: Mutex::new(Vec::new()),
@@ -489,6 +526,9 @@ pub fn run() {
                     handle_open_request(&h2, &payload.url);
                 }
             });
+
+            #[cfg(not(debug_assertions))]
+            spawn_update_check(handle.clone());
 
             Ok(())
         })

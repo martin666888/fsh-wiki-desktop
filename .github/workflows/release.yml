@@ -1,0 +1,54 @@
+name: Release
+
+# 打 tag（形如 v0.1.5）时自动：构建 → 签名 → 建 Release → 上传安装包与更新包 → 生成 latest.json
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend deps
+        run: npm ci
+
+      # 注意：bundle.createUpdaterArtifacts 为 true 时，构建必须拿到签名私钥，
+      # 否则 tauri build 会直接报错。私钥存在仓库 Secret 里，不落盘到仓库。
+      #
+      # 两个环境变量缺一不可：Windows 不允许"空值环境变量"（设为空串等于删除该变量），
+      # 所以即使私钥本身没有密码，也必须显式提供密码变量，否则 tauri 会停在交互式密码提示上。
+      - name: Build and release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "飞书文档轻客户端 ${{ github.ref_name }}"
+          releaseBody: "由 GitHub Actions 自动构建发布。"
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true
