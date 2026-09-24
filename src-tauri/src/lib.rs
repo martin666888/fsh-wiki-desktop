@@ -114,6 +114,15 @@ fn font_apply_js(cfg: &FontConfig) -> String {
     )
 }
 
+// document-start 注入：初始化脚本跑在 HTML 解析之前，那时 head/documentElement
+// 可能还不存在，用 MutationObserver 等文档根出现再插 <style>，赶在首帧前生效
+fn font_init_js(css: &str) -> String {
+    format!(
+        r#"(function(){{var CSS={css};function apply(){{var d=document;var el=d.getElementById('feishu-font-force');if(!el){{var host=d.head||d.documentElement;if(!host)return false;el=d.createElement('style');el.id='feishu-font-force';host.appendChild(el);}}if(el.textContent!==CSS)el.textContent=CSS;return true;}}if(apply())return;var mo=new MutationObserver(function(){{if(apply())mo.disconnect();}});mo.observe(document,{{childList:true,subtree:true}});}})();"#,
+        css = serde_json::to_string(css).unwrap_or_default()
+    )
+}
+
 fn apply_font_config(app: &AppHandle) {
     let cfg = load_font_config();
     let js = font_apply_js(&cfg);
@@ -269,10 +278,22 @@ fn spawn_tab(app: &AppHandle, url: &str) -> Result<String, String> {
     let n = state.counter.fetch_add(1, Ordering::SeqCst);
     let label = format!("tab-{n}");
 
-    let builder = WebviewBuilder::new(&label, WebviewUrl::External(parsed))
+    // 建 WebView 前读配置，把 CSS 烘进 document-start 初始化脚本：
+    // 首帧之前字体就位，不再等 NavigationCompleted 后的 eval
+    let font_css = {
+        let cfg = load_font_config();
+        if cfg.enabled { cfg.css() } else { String::new() }
+    };
+    let mut builder = WebviewBuilder::new(&label, WebviewUrl::External(parsed))
         .background_color(Color(255, 255, 255, 255))
         .data_directory(data_dir().join("webview"))
-        .initialization_script(INIT_JS)
+        .initialization_script(INIT_JS);
+    if !font_css.is_empty() {
+        builder = builder.initialization_script(font_init_js(&font_css));
+    }
+    let builder = builder
+        // 兜底：烘进脚本的 CSS 是建 Tab 那一刻的快照，设置页改字体后
+        // 已存在的 Tab 再整页导航会先命中旧快照，这里用最新配置纠正
         .on_page_load(|webview, payload| {
             if let tauri::webview::PageLoadEvent::Finished = payload.event() {
                 let cfg = load_font_config();
