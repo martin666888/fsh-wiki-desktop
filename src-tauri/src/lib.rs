@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Listener, Manager, Position, Size, WebviewUrl, WindowEvent};
-use tauri::webview::WebviewBuilder;
+use tauri::webview::{Color, WebviewBuilder};
 
 const TAB_BAR_HEIGHT: f64 = 42.0;
 const DEFAULT_URL: &str = "https://www.feishu.cn/drive/home/";
@@ -148,24 +148,38 @@ fn set_font_config(app: AppHandle, config: FontConfig) -> Result<(), String> {
 // 必须 async：同步命令在主线程重入创建 WebView2 控制器会产出空白 WebView
 #[tauri::command]
 async fn open_settings(app: AppHandle) {
+    // 设置窗要落在主窗口中心：Tauri 新窗口默认位置与主显示器绑定，
+    // 双屏下会跑到左屏原点，必须按主窗口外框坐标手动算
+    let pos = app.get_window("main").and_then(|main| {
+        let scale = main.scale_factor().ok()?;
+        let outer = main.outer_position().ok()?;
+        let size = main.outer_size().ok()?;
+        let (w, h) = (430.0 * scale, 440.0 * scale);
+        Some((
+            (outer.x as f64 + (size.width as f64 - w) / 2.0) / scale,
+            (outer.y as f64 + (size.height as f64 - h) / 2.0) / scale,
+        ))
+    });
+
     if let Some(w) = app.get_webview_window("settings") {
+        if let Some((x, y)) = pos {
+            let _ = w.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(x, y)));
+        }
         let _ = w.set_focus();
         return;
     }
-    let _w = tauri::WebviewWindowBuilder::new(
+    let mut builder = tauri::WebviewWindowBuilder::new(
         &app,
         "settings",
         WebviewUrl::App("settings.html".into()),
     )
     .title("显示字体设置")
     .inner_size(430.0, 440.0)
-    .resizable(false)
-    .on_page_load(|webview, payload| {
-        if let tauri::webview::PageLoadEvent::Finished = payload.event() {
-            eprintln!("[feishu-desktop] settings page loaded: {}", webview.url().map(|u| u.to_string()).unwrap_or_default());
-        }
-    })
-    .build();
+    .resizable(false);
+    if let Some((x, y)) = pos {
+        builder = builder.position(x, y);
+    }
+    let _w = builder.build();
 }
 
 fn is_feishu_host(host: &str) -> bool {
@@ -252,6 +266,7 @@ fn spawn_tab(app: &AppHandle, url: &str) -> Result<String, String> {
 
     let font_app = app.clone();
     let builder = WebviewBuilder::new(&label, WebviewUrl::External(parsed))
+        .background_color(Color(255, 255, 255, 255))
         .initialization_script(INIT_JS)
         .on_page_load(move |webview, payload| {
             if let tauri::webview::PageLoadEvent::Finished = payload.event() {
@@ -295,6 +310,16 @@ fn spawn_tab(app: &AppHandle, url: &str) -> Result<String, String> {
 }
 
 fn do_close_tab(app: &AppHandle, label: &str) {
+    let state = app.state::<TabState>();
+    let is_last = {
+        let tabs = state.tabs.lock().unwrap();
+        tabs.len() == 1 && tabs.first().map(String::as_str) == Some(label)
+    };
+    // 内容区不允许零 WebView：关最后一个 Tab 时先补新首页 Tab 再销毁旧的，
+    // 否则裸窗口客户区会露出未绘制区域（黑块残影）
+    if is_last {
+        let _ = spawn_tab(app, DEFAULT_URL);
+    }
     if let Some(wv) = find_webview(app, label) {
         let _ = wv.hide();
         let _ = wv.close();
@@ -343,11 +368,9 @@ async fn activate_tab(app: AppHandle, label: String) {
 
 #[tauri::command]
 fn list_tabs(app: AppHandle) -> TabsSnapshot {
-    eprintln!("[feishu-desktop] list_tabs");
     let state = app.state::<TabState>();
     let tabs = state.tabs.lock().unwrap().clone();
     let active = state.active.lock().unwrap().clone();
-    eprintln!("[feishu-desktop] list_tabs -> {tabs:?} active={active:?}");
     TabsSnapshot { tabs, active }
 }
 
@@ -377,6 +400,8 @@ pub fn run() {
                 .title("飞书文档")
                 .inner_size(1280.0, 860.0)
                 .min_inner_size(800.0, 600.0)
+                .decorations(false)
+                .background_color(Color(255, 255, 255, 255))
                 .center()
                 .build()?;
 
@@ -393,7 +418,8 @@ pub fn run() {
                     Size::Physical(tauri::PhysicalSize::new(inner.width, bar_h)),
                 )
             };
-            let ui_builder = WebviewBuilder::new("ui", WebviewUrl::App("index.html".into()));
+            let ui_builder = WebviewBuilder::new("ui", WebviewUrl::App("index.html".into()))
+                .background_color(Color(232, 234, 237, 255));
             let ui = window.add_child(ui_builder, bar_pos, bar_size)?;
             let _ = ui.set_focus();
 
