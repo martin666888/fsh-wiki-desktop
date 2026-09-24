@@ -1,0 +1,17 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "remote-feishu",
+  "description": "允许飞书远程页面通过 IPC 上报标题和 window.open 拦截事件",
+  "windows": ["main"],
+  "remote": {
+    "urls": [
+      "https://feishu.cn",
+      "https://*.feishu.cn",
+      "https://*.*.feishu.cn",
+      "https://larksuite.com",
+      "https://*.larksuite.com",
+      "https://*.*.larksuite.com"
+    ]
+  },
+  "permissions": ["core:event:default"]
+}
