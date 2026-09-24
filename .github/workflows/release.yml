@@ -1,6 +1,6 @@
 name: Release
 
-# 打 tag（形如 v0.1.5）时自动：构建 → 签名 → 建 Release → 上传安装包与更新包 → 生成 latest.json
+# 打 tag（形如 v0.1.5）时自动：构建 → 签名 → 建 Release → 上传安装包 → 生成 latest.json
 on:
   push:
     tags:
@@ -15,12 +15,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Setup Rust
@@ -39,6 +39,11 @@ jobs:
       #
       # 两个环境变量缺一不可：Windows 不允许"空值环境变量"（设为空串等于删除该变量），
       # 所以即使私钥本身没有密码，也必须显式提供密码变量，否则 tauri 会停在交互式密码提示上。
+      #
+      # includeUpdaterJson 关掉：tauri-action 内置的 updater JSON 只认 Tauri v1 风格的
+      # `.nsis.zip.sig`，而当前 CLI 产出的是 `.exe.sig`，它只会打印
+      # "Signature not found for the updater JSON. Skipping upload." 然后跳过，
+      # 所以 latest.json 交给下面那一步自己生成。
       - name: Build and release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -51,4 +56,53 @@ jobs:
           releaseBody: "由 GitHub Actions 自动构建发布。"
           releaseDraft: false
           prerelease: false
-          includeUpdaterJson: true
+          includeUpdaterJson: false
+
+      # 生成并上传自动更新清单 latest.json。
+      #
+      # 两个必须注意的点：
+      #  1. 资源名要从 Release 上读真实值，不能自己拼：GitHub 会剥掉资源名里的非 ASCII 字符，
+      #     "飞书文档轻客户端_0.1.5_x64-setup.exe" 实际会被存成 "_0.1.5_x64-setup.exe"。
+      #  2. manifest 里的 version 必须与签名 trusted comment 中记录的版本一致，
+      #     否则客户端验签时会报 SignedVersionMismatch 并拒绝安装。
+      - name: Publish updater manifest
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag  = '${{ github.ref_name }}'
+          $repo = '${{ github.repository }}'
+
+          $assets = (gh release view $tag --repo $repo --json assets | ConvertFrom-Json).assets
+          $exe = $assets | Where-Object { $_.name -like '*.exe' } | Select-Object -First 1
+          if (-not $exe) { throw "Release $tag 上找不到安装包资源" }
+
+          $sigAsset = "$($exe.name).sig"
+          $tmp = $env:RUNNER_TEMP
+          gh release download $tag --repo $repo --pattern $sigAsset --dir $tmp --clobber
+          $signature = (Get-Content -Raw (Join-Path $tmp $sigAsset)).Trim()
+
+          $manifest = [ordered]@{
+            version   = $tag.TrimStart('v')
+            notes     = "自动发布 $tag"
+            pub_date  = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+            platforms = [ordered]@{
+              'windows-x86_64' = [ordered]@{
+                signature = $signature
+                url       = "https://github.com/$repo/releases/download/$tag/$($exe.name)"
+              }
+            }
+          }
+
+          $path = Join-Path $tmp 'latest.json'
+          [System.IO.File]::WriteAllText(
+            $path,
+            ($manifest | ConvertTo-Json -Depth 6),
+            (New-Object System.Text.UTF8Encoding($false))
+          )
+          Write-Output '--- latest.json ---'
+          Get-Content $path
+
+          gh release upload $tag $path --repo $repo --clobber
+          Write-Output 'latest.json 已上传'

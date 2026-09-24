@@ -69,8 +69,10 @@ npm run tauri build
 
 产物在 `src-tauri/target/release/bundle/nsis/`：
 
-- `飞书文档轻客户端_<版本>_x64-setup.exe` —— 安装包
-- `飞书文档轻客户端_<版本>_x64-setup.nsis.zip` + `.sig` —— 更新包与签名（自动更新用，不用手动分发）
+- `飞书文档轻客户端_<版本>_x64-setup.exe` —— 安装包（同时就是更新包）
+- `飞书文档轻客户端_<版本>_x64-setup.exe.sig` —— 签名，自动更新时验签用，不用手动分发
+
+> Tauri v2 下 NSIS 的更新产物就是安装器本体加一个 `.sig`，不再是 v1 时代的 `.nsis.zip`。
 
 ## 发版与自动更新
 
