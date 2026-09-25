@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Listener, Manager, Position, Size, WebviewUrl, WindowEvent};
 use tauri::webview::{Color, WebviewBuilder};
+use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
 const TAB_BAR_HEIGHT: f64 = 42.0;
 const DEFAULT_URL: &str = "https://www.feishu.cn/drive/home/";
@@ -753,6 +754,23 @@ fn spawn_update_boot(app: AppHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // 单实例插件必须最先注册。第二个实例要在其他插件初始化之前就被拦下，
+        // 否则它可能已经建好窗口、发起了更新检查，才被 exit 掉。
+        // 互斥体名取自 tauri.conf.json 的 identifier，因此开发版与安装版会互相排斥。
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            // 把已有实例的主窗口还原并置前
+            if let Some(window) = app.get_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+            app.dialog()
+                .message("飞书文档轻客户端已经在运行，无需重复启动。")
+                .title("程序已在运行")
+                .kind(MessageDialogKind::Info)
+                .show(|_| {});
+        }))
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(UpdateState {
             prefs: Mutex::new(load_update_prefs()),
@@ -816,8 +834,8 @@ pub fn run() {
 
             {
                 let h = handle.clone();
-                window.on_window_event(move |event| {
-                    if let WindowEvent::Resized(_) = event {
+                window.on_window_event(move |event| match event {
+                    WindowEvent::Resized(_) => {
                         let Some(win) = h.get_window("main") else {
                             return;
                         };
@@ -844,6 +862,14 @@ pub fn run() {
                             }
                         }
                     }
+                    // 主窗口关闭时一并关掉设置窗。设置窗是独立的顶层窗口，它若还开着，
+                    // 进程不会退出，单实例互斥体继续被占用，再次启动会被判定为「已在运行」。
+                    WindowEvent::CloseRequested { .. } => {
+                        if let Some(settings) = h.get_webview_window("settings") {
+                            let _ = settings.close();
+                        }
+                    }
+                    _ => {}
                 });
             }
 
