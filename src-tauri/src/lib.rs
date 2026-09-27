@@ -11,6 +11,12 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 const TAB_BAR_HEIGHT: f64 = 42.0;
 const DEFAULT_URL: &str = "https://www.feishu.cn/drive/home/";
 const INIT_JS: &str = include_str!("init.js");
+// WebView2 默认附带自己的右键菜单（返回 / 刷新 / 另存为 / 打印 / 更多工具），
+// 这些属于浏览器功能，不属于套壳应用。wry 提供了 with_default_context_menus，
+// 但 Tauri 2 未将其暴露出来，因此在页面侧拦截 contextmenu 的默认行为。
+// 使用捕获阶段且不调用 stopPropagation：飞书页面自身的右键菜单仍会正常弹出。
+const NO_DEFAULT_MENU_JS: &str =
+    r#"document.addEventListener("contextmenu", function (e) { e.preventDefault(); }, true);"#;
 // 设置窗尺寸：居中定位与建窗必须共用同一组值，否则双屏下窗口位置会漂
 const SETTINGS_W: f64 = 430.0;
 const SETTINGS_H: f64 = 480.0;
@@ -219,6 +225,7 @@ async fn open_settings(app: AppHandle, tab: Option<String>) {
     // 于是任务栏会同时出现主窗口和设置两个图标。这里跳过任务栏，
     // 让它表现得像主窗口里的一个附属面板。
     .skip_taskbar(true)
+    .initialization_script(NO_DEFAULT_MENU_JS)
     .data_directory(data_dir().join("webview"));
     if let Some((x, y)) = pos {
         builder = builder.position(x, y);
@@ -317,7 +324,8 @@ fn spawn_tab(app: &AppHandle, url: &str) -> Result<String, String> {
     let mut builder = WebviewBuilder::new(&label, WebviewUrl::External(parsed))
         .background_color(Color(255, 255, 255, 255))
         .data_directory(data_dir().join("webview"))
-        .initialization_script(INIT_JS);
+        .initialization_script(INIT_JS)
+        .initialization_script(NO_DEFAULT_MENU_JS);
     if !font_css.is_empty() {
         builder = builder.initialization_script(font_init_js(&font_css));
     }
@@ -828,6 +836,7 @@ pub fn run() {
             };
             let ui_builder = WebviewBuilder::new("ui", WebviewUrl::App("index.html".into()))
                 .background_color(Color(232, 234, 237, 255))
+                .initialization_script(NO_DEFAULT_MENU_JS)
                 .data_directory(data_dir().join("webview"));
             let ui = window.add_child(ui_builder, bar_pos, bar_size)?;
             let _ = ui.set_focus();
