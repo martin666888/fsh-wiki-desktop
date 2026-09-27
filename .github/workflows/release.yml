@@ -1,17 +1,26 @@
 name: Release
 
-# 打 tag（形如 v0.1.5）时自动：构建 → 签名 → 建 Release → 上传安装包 → 生成 latest.json
 on:
   push:
     tags:
       - "v*"
 
+# 所有版本共用一把发布锁，避免旧任务最后完成而覆盖 latest。
+concurrency:
+  group: release-${{ github.repository }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
 jobs:
   release:
     runs-on: windows-latest
-    timeout-minutes: 40
+    timeout-minutes: 45
     permissions:
       contents: write
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
 
     steps:
       - name: Checkout
@@ -25,26 +34,36 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - name: Cache Rust
         uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
 
-      - name: Install frontend deps
+      - name: Install frontend dependencies
         run: npm ci
 
-      # 注意：bundle.createUpdaterArtifacts 为 true 时，构建必须拿到签名私钥，
-      # 否则 tauri build 会直接报错。私钥存在仓库 Secret 里，不落盘到仓库。
-      #
-      # 两个环境变量缺一不可：Windows 不允许"空值环境变量"（设为空串等于删除该变量），
-      # 所以即使私钥本身没有密码，也必须显式提供密码变量，否则 tauri 会停在交互式密码提示上。
-      #
-      # includeUpdaterJson 关掉：tauri-action 内置的 updater JSON 只认 Tauri v1 风格的
-      # `.nsis.zip.sig`，而当前 CLI 产出的是 `.exe.sig`，它只会打印
-      # "Signature not found for the updater JSON. Skipping upload." 然后跳过，
-      # 所以 latest.json 交给下面那一步自己生成。
-      - name: Build and release
+      - name: Check versions and release configuration
+        id: metadata
+        run: npm run check:project
+
+      - name: Validate signature checks and frontend
+        run: npm run check
+
+      - name: Validate Rust
+        run: npm run check:rust
+
+      - name: Check release target
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run release:prepare
+
+      # 签名密钥只提供给构建步骤；后续验证只读取 tauri.conf.json 内的公钥。
+      # 安装器、签名与清单验证完成前保持 draft，不影响用户正在读取的 latest。
+      - name: Build signed draft
+        id: build
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -53,56 +72,20 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "飞书文档轻客户端 ${{ github.ref_name }}"
-          releaseBody: "由 GitHub Actions 自动构建发布。"
-          releaseDraft: false
-          prerelease: false
+          releaseBody: "由 GitHub Actions 自动构建并验证安装包、签名和更新清单。"
+          releaseDraft: true
+          prerelease: ${{ steps.metadata.outputs.prerelease }}
           includeUpdaterJson: false
+          args: --ci -- --locked
 
-      # 生成并上传自动更新清单 latest.json。
-      #
-      # 两个必须注意的点：
-      #  1. 资源名要从 Release 上读真实值，不能自己拼：GitHub 会剥掉资源名里的非 ASCII 字符，
-      #     "飞书文档轻客户端_0.1.5_x64-setup.exe" 实际会被存成 "_0.1.5_x64-setup.exe"。
-      #  2. manifest 里的 version 必须与签名 trusted comment 中记录的版本一致，
-      #     否则客户端验签时会报 SignedVersionMismatch 并拒绝安装。
-      - name: Publish updater manifest
-        shell: pwsh
+      - name: Verify installer and upload updater manifest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $tag  = '${{ github.ref_name }}'
-          $repo = '${{ github.repository }}'
+          RELEASE_ID: ${{ steps.build.outputs.releaseId }}
+        run: npm run release:manifest
 
-          $assets = (gh release view $tag --repo $repo --json assets | ConvertFrom-Json).assets
-          $exe = $assets | Where-Object { $_.name -like '*.exe' } | Select-Object -First 1
-          if (-not $exe) { throw "Release $tag 上找不到安装包资源" }
-
-          $sigAsset = "$($exe.name).sig"
-          $tmp = $env:RUNNER_TEMP
-          gh release download $tag --repo $repo --pattern $sigAsset --dir $tmp --clobber
-          $signature = (Get-Content -Raw (Join-Path $tmp $sigAsset)).Trim()
-
-          $manifest = [ordered]@{
-            version   = $tag.TrimStart('v')
-            notes     = "自动发布 $tag"
-            pub_date  = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-            platforms = [ordered]@{
-              'windows-x86_64' = [ordered]@{
-                signature = $signature
-                url       = "https://github.com/$repo/releases/download/$tag/$($exe.name)"
-              }
-            }
-          }
-
-          $path = Join-Path $tmp 'latest.json'
-          [System.IO.File]::WriteAllText(
-            $path,
-            ($manifest | ConvertTo-Json -Depth 6),
-            (New-Object System.Text.UTF8Encoding($false))
-          )
-          Write-Output '--- latest.json ---'
-          Get-Content $path
-
-          gh release upload $tag $path --repo $repo --clobber
-          Write-Output 'latest.json 已上传'
+      - name: Verify uploaded assets and publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ steps.build.outputs.releaseId }}
+        run: npm run release:publish

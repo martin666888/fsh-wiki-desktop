@@ -1,0 +1,23 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "settings",
+  "description": "仅本地设置页可修改配置和主动安装更新",
+  "webviews": ["settings"],
+  "local": true,
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-list-fonts",
+    "allow-get-font-config",
+    "allow-set-font-config",
+    "allow-app-version",
+    "allow-take-settings-tab",
+    "allow-get-update-status",
+    "allow-get-update-prefs",
+    "allow-set-update-prefs",
+    "allow-check-update",
+    "allow-download-update",
+    "allow-install-update",
+    "allow-cancel-update"
+  ]
+}

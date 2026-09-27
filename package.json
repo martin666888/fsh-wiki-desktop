@@ -1,13 +1,20 @@
 {
   "name": "feishu-desktop",
   "private": true,
-  "version": "0.1.11",
+  "version": "0.1.12",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "check:project": "node scripts/check-project.mjs",
+    "check:signatures": "node scripts/check-signatures.mjs",
+    "check": "npm run check:project && npm run check:signatures && npm run build",
+    "check:rust": "cargo fmt --manifest-path src-tauri/Cargo.toml -- --check && cargo check --manifest-path src-tauri/Cargo.toml --locked && cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml --locked",
+    "release:prepare": "node scripts/release.mjs prepare",
+    "release:manifest": "node scripts/release.mjs manifest",
+    "release:publish": "node scripts/release.mjs publish"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",

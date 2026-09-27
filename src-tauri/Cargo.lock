@@ -1067,9 +1067,13 @@ dependencies = [
 
 [[package]]
 name = "feishu-desktop"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
+ "base64 0.22.1",
  "font-loader",
+ "futures-util",
+ "minisign-verify",
+ "semver",
  "serde",
  "serde_json",
  "tauri",
@@ -1077,6 +1081,9 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
+ "tempfile",
+ "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -1,16 +1,23 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "主 UI 窗口默认权限",
-  "windows": ["main", "settings"],
+  "description": "仅本地标签栏可操作主窗口和标签；不向内容页授权",
+  "webviews": ["ui"],
+  "local": true,
   "permissions": [
-    "core:default",
-    "core:event:default",
-    "core:window:allow-set-title",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
     "core:window:allow-start-dragging",
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
+    "core:window:allow-internal-toggle-maximize",
     "core:window:allow-close",
-    "core:window:allow-is-maximized"
+    "core:window:allow-is-maximized",
+    "allow-create-tab",
+    "allow-close-tab",
+    "allow-activate-tab",
+    "allow-list-tabs",
+    "allow-open-settings",
+    "allow-get-update-status"
   ]
 }
