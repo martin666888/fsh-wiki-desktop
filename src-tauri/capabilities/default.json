@@ -2,7 +2,9 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "仅本地标签栏可操作主窗口和标签；不向内容页授权",
-  "webviews": ["ui"],
+  "webviews": [
+    "ui"
+  ],
   "local": true,
   "permissions": [
     "core:event:allow-listen",
@@ -17,7 +19,9 @@
     "allow-close-tab",
     "allow-activate-tab",
     "allow-list-tabs",
+    "allow-set-split",
     "allow-open-settings",
-    "allow-get-update-status"
+    "allow-get-update-status",
+    "allow-reload-tab"
   ]
 }

@@ -12,6 +12,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, "index.html"),
         settings: resolve(__dirname, "settings.html"),
+        workspace: resolve(__dirname, "workspace.html"),
       },
     },
   },
@@ -27,7 +28,7 @@ export default defineConfig({
         }
       : undefined,
     watch: {
-      ignored: ["**/src-tauri/**"],
+      ignored: ["**/src-tauri/**", "**/.local-artifacts/**", "**/data/**"],
     },
   },
 });

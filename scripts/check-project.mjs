@@ -77,7 +77,7 @@ export function checkProject(tag = undefined) {
     }
     if (capability.permissions?.length) {
       assert.ok(!capability.windows?.length, `${file} 应按本地 WebView 授权而非整个窗口`);
-      assert.ok(capability.webviews?.length && capability.webviews.every((label) => ["ui", "settings"].includes(label)), `${file} 只能向 ui/settings 授权`);
+      assert.ok(capability.webviews?.length && capability.webviews.every((label) => ["ui", "settings", "workspace"].includes(label)), `${file} 只能向本地 ui/settings/workspace 授权`);
       for (const permission of capability.permissions) {
         const name = typeof permission === "string" ? permission : permission.identifier;
         assert.ok(!["core:default", "core:event:default", "core:event:allow-emit", "core:event:allow-emit-to"].includes(name), `${file} 不应开放通用事件写权限`);

@@ -11,6 +11,20 @@ button:focus-visible, select:focus-visible, [tabindex="0"]:focus-visible { outli
 .tab-scroll::-webkit-scrollbar { height: 0; }
 .tab { display: flex; align-items: center; flex: 0 1 220px; min-width: 110px; height: 32px; background: #f1f2f4; border: 1px solid #d0d3d8; border-radius: 8px; font-size: 13px; color: #444; }
 .tab.active { background: #fff; border-color: #b2b7bf; color: #111; }
+.tab.split-tab { flex-basis: 320px; min-width: 180px; }
+.tab-split-icon { flex: 0 0 auto; margin-right: 7px; color: #667582; }
+.tab-title-divider { flex: 0 0 auto; width: 1px; height: 13px; margin: 0 8px; background: #cbd1d7; }
+.split-tab .tab-title { flex: 1; color: #68727c; }
+.split-tab.active .focused-title { color: #161b22; }
+.tab-loading { flex: 0 0 auto; width: 10px; height: 10px; margin-left: 6px; border: 1.5px solid #ccd5df; border-top-color: #0067c0; border-radius: 50%; animation: tab-spin 1s linear infinite; }
+.tab-load-error { color: #a52a31; margin-left: 5px; }
+@keyframes tab-spin { to { transform: rotate(360deg); } }
+.split-controls { display: flex; flex: 0 0 auto; height: 28px; border-radius: 6px; }
+.split-controls.on { background: #d6d6d6; color: #303030; }
+.split-toggle { display: flex; align-items: center; justify-content: center; gap: 5px; border: 0; background: transparent; color: inherit; border-radius: 5px; cursor: pointer; }
+.split-toggle { padding: 0 7px; font-size: 12px; }
+.split-toggle:hover:not(:disabled) { background: #cecece; }
+.split-toggle:disabled { opacity: .45; cursor: default; }
 .tab-select { min-width: 0; height: 100%; flex: 1; border: 0; border-radius: 7px; padding: 0 6px 0 12px; background: transparent; color: inherit; text-align: left; cursor: pointer; display: flex; align-items: center; }
 .tab-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tab-close, .newtab, .settings-btn { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; border: none; background: transparent; cursor: pointer; border-radius: 6px; width: 28px; height: 28px; color: #444; }

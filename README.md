@@ -4,7 +4,8 @@
 
 ## 功能与边界
 
-- 每个标签使用独立 WebView，切换时隐藏而不销毁，保留当前页面状态。标签列表独立滚动，窗口控制按钮固定可达；支持中键关闭与键盘操作。
+- 每个页面使用独立 WebView，切换时隐藏而不销毁，保留当前页面状态。标签列表独立滚动，窗口控制按钮固定可达；支持中键关闭与键盘操作。
+- 顶部「分屏」支持单页、左侧文章加右侧选页、左右双文档三种状态。复用原标签的 WebView，分屏、切换和退出均不重新导航页面。
 - 无边框主窗口支持拖动、双击最大化和窗口控制；设置窗口复用时可从最小化恢复，关闭主窗口会同时关闭设置窗口。
 - 西文、中文、代码字体分别设置，只改变本地显示，不修改文档。代码与图标子树单独保护；关闭字体后，已有标签重新导航同样清除覆盖样式。
 - 飞书/Lark 域的标准 HTTPS 链接在应用内打开；其他 HTTP/HTTPS 链接交给系统浏览器。带用户名密码的 URL、文件链接及未知协议不交给系统执行。
@@ -14,13 +15,23 @@
 
 ## 代码入口与权限
 
-`src-tauri/src/lib.rs` 负责应用装配和设置窗口；`tabs.rs` 管理标签、标题快照与布局；`fonts.rs` 管理字体；`navigation.rs` 统一链接分类；`storage.rs` 提供原子写入；`updates.rs` 管理更新任务、签名缓存和安装。
+`src-tauri/src/lib.rs` 负责应用装配和设置窗口；`tabs.rs` 管理标签和工作区快照；`layout.rs` 定义布局状态与尺寸约束；`native.rs` 接入 WebView2 焦点、加载结果、预览和分隔线鼠标捕获；`fonts.rs` 管理字体；`navigation.rs` 统一链接分类；`storage.rs` 提供原子写入；`updates.rs` 管理更新任务、签名缓存和安装。
 
-主窗口使用 `WindowBuilder`，再通过 `add_child()` 挂载高 42 逻辑像素的本地 `ui` 标签栏与内容 WebView。布局按 `scale_factor` 换算成物理像素。涉及 WebView 增删的命令保持 `async`，避免主线程重入阻塞。
+主窗口使用 `WindowBuilder`，再通过 `add_child()` 挂载高 42 逻辑像素的本地 `ui` 标签栏、本地 `workspace` 选页与分隔线、独立内容 WebView。窗口过窄时显示布局提示；布局按 `scale_factor` 换算成物理像素。布局操作串行执行，原生位置统一在主线程更新。涉及 WebView 增删的命令保持 `async`，避免主线程重入阻塞。
 
-标题通过 Tauri 的原生 `on_document_title_changed` 回调读取，Rust 保存完整标签快照并通知本地标签栏，不再向远程页面注入标题轮询或授予事件总线权限。应用命令由 `build.rs` 声明 ACL，仅本地 `ui/settings` WebView 获得所需能力；远程飞书页面没有本地 IPC 权限。CSP 限制本地界面资源，开发 CSP 单独允许 Vite 连接；这不替代飞书网页自己的 CSP。
+标题通过 Tauri 的原生 `on_document_title_changed` 回调读取，Rust 保存完整标签快照并通知本地标签栏和工作区。应用命令由 `build.rs` 声明 ACL，仅本地 `ui/settings/workspace` WebView 获得各自所需能力；远程飞书页面没有本地 IPC 权限。CSP 限制本地界面资源，开发 CSP 单独允许 Vite 连接；这不替代飞书网页自己的 CSP。
 
-前端入口为 `src/App.tsx` 和 `src/Settings.tsx`。设置保存失败会显示原因，只有后端保存成功才确认新值；更新状态包含检查、下载、取消和安装阶段。
+前端入口为 `src/App.tsx`、`src/Workspace.tsx` 和 `src/Settings.tsx`。设置保存失败会显示原因，只有后端保存成功才确认新值；更新状态包含检查、下载、取消和安装阶段。
+
+## 分屏浏览
+
+- 分屏属于单个标签。点击顶部「分屏」后，当前标签进入选页；选择另一个独立标签，会将其页面合并进当前标签，复用原 WebView。已有分屏组合不会被选页操作拆散。
+- 顶部「＋」、Ctrl+T 和文章中的新标签链接创建独立的完整页面标签。分屏内的飞书首页、云盘列表作为选页入口，点击文章直接在所在栏打开。原来的分屏组合、焦点和宽度保存在原标签内；切回即可继续阅读。多个标签可以各自分屏。
+- 选页区的「在此打开首页」只用于给当前分屏添加第二个页面，与顶部新建标签明确区分。选页支持搜索、预览、Tab、方向键、Enter，Esc 退出选页。
+- 关闭分屏标签会关闭其中两个页面。退出分屏会将两个页面拆为独立标签，最近操作的页面留在当前标签；退出选页则恢复原页面。以上布局操作不重新加载文章。
+- 分隔线宽 6 逻辑像素，可拖动，双击恢复均分；获得焦点后支持方向键、Shift 加方向键、Home/End、Enter，拖动时 Esc 撤销。每栏最小宽度 480，窗口至少 966 逻辑像素宽才可分屏。变窄时暂时显示当前页面，扩大后恢复原比例。
+- 页面加载状态和失败重试入口位于标签栏。
+- 标签与分屏布局只在本次运行中保留，重启仍打开首页。
 
 ## 数据目录
 
@@ -66,7 +77,7 @@ npm run check
 npm run check:rust
 ```
 
-- `check:project`：核对 npm、Cargo、Tauri、两份锁文件的版本，并检查 CSP、远程权限与签名发布配置。指定 tag 可运行 `npm run check:project -- --tag v0.1.12`。
+- `check:project`：核对 npm、Cargo、Tauri、两份锁文件的版本，并检查 CSP、远程权限与签名发布配置。指定 tag 可运行 `npm run check:project -- --tag v0.1.13`。
 - `check:signatures`：使用 Node 内置 `assert/crypto` 和公开签名向量验证 Ed/ED 兼容、bytes 与可信注释篡改拒绝、版本绑定和稳定版顺序，不使用私钥或可执行安装器。
 - `check`：依次执行上述脚本及 TypeScript/Vite 构建。
 - `check:rust`：依次运行 Rust 格式检查、锁定依赖检查、严格 Clippy 和 Rust 自带的单元测试。已有依赖齐全时，可单独运行 cargo check/clippy/test 并增加 `--offline`。
@@ -98,7 +109,7 @@ Tauri 2 的 NSIS 更新产物是安装器与签名，无需 v1 的 `.nsis.zip` �
 准备新版本时同步修改 `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json`，再更新 `package-lock.json` 和 `src-tauri/Cargo.lock` 中对应的应用版本。不得只改 tag。先验证待发布版本，例如：
 
 ```powershell
-npm run check:project -- --tag v0.1.12
+npm run check:project -- --tag v0.1.13
 npm run check
 npm run check:rust
 ```

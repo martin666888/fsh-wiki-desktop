@@ -1,0 +1,25 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "workspace",
+  "description": "本地分屏工作区：选页、文档焦点、预览和分隔线；不向远程内容授权",
+  "webviews": [
+    "workspace"
+  ],
+  "local": true,
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:allow-maximize",
+    "allow-list-tabs",
+    "allow-create-tab",
+    "allow-set-split",
+    "allow-choose-split-tab",
+    "allow-focus-pane",
+    "allow-set-split-ratio",
+    "allow-reload-tab",
+    "allow-capture-tab-preview",
+    "allow-begin-split-resize",
+    "allow-create-split-page",
+    "allow-report-workspace-error"
+  ]
+}

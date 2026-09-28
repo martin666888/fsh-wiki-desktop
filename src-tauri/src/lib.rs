@@ -1,4 +1,6 @@
 mod fonts;
+mod layout;
+mod native;
 mod navigation;
 mod storage;
 mod tabs;
@@ -131,6 +133,15 @@ pub fn run() {
             tabs::close_tab,
             tabs::activate_tab,
             tabs::list_tabs,
+            tabs::set_split,
+            tabs::choose_split_tab,
+            tabs::create_split_page,
+            tabs::focus_pane,
+            tabs::set_split_ratio,
+            tabs::reload_tab,
+            tabs::report_workspace_error,
+            native::capture_tab_preview,
+            native::begin_split_resize,
             fonts::list_fonts,
             fonts::get_font_config,
             fonts::set_font_config,
@@ -168,6 +179,21 @@ pub fn run() {
                     inner.width,
                     (tabs::TAB_BAR_HEIGHT * scale).round() as u32,
                 )),
+            )?;
+            // The local workspace owns pane headers, the picker, and the divider.
+            // Content WebViews are created later and positioned above this surface.
+            let workspace =
+                WebviewBuilder::new("workspace", WebviewUrl::App("workspace.html".into()))
+                    .background_color(Color(249, 249, 249, 255))
+                    .initialization_script(NO_DEFAULT_MENU_JS)
+                    .data_directory(data_dir().join("webview"));
+            window.add_child(
+                workspace,
+                tauri::LogicalPosition::new(0.0, tabs::TAB_BAR_HEIGHT),
+                tauri::LogicalSize::new(
+                    inner.width as f64 / scale,
+                    (inner.height as f64 / scale - tabs::TAB_BAR_HEIGHT).max(1.0),
+                ),
             )?;
             let event_app = handle.clone();
             window.on_window_event(move |event| match event {

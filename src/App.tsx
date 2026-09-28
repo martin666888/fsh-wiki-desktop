@@ -4,7 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { errorMessage } from "./feedback";
 import { isUpdateStatus, needsAttention } from "./update";
-import { isTabsSnapshot, type TabsSnapshot } from "./tabs";
+import { EMPTY_SNAPSHOT, isSplit, isTabsSnapshot, type TabsSnapshot } from "./tabs";
 import "./App.css";
 
 const DEFAULT_URL = "https://www.feishu.cn/drive/home/";
@@ -12,8 +12,19 @@ const DEFAULT_URL = "https://www.feishu.cn/drive/home/";
 interface BarError { message: string; retry?: () => void; }
 
 export default function App() {
-  const [snapshot, setSnapshot] = useState<TabsSnapshot>({ tabs: [], active: null, revision: -1 });
-  const { tabs, active } = snapshot;
+  const [snapshot, setSnapshot] = useState<TabsSnapshot>(EMPTY_SNAPSHOT);
+  const active = snapshot.activeGroup;
+  const tabs = snapshot.groups.map(group => {
+    const layout = group.layout;
+    const page = (label: string) => snapshot.tabs.find(tab => tab.label === label);
+    const left = layout.mode === "single" ? page(layout.tab) : isSplit(layout) ? page(layout.left) : undefined;
+    const right = layout.mode === "split" ? page(layout.right) : undefined;
+    return { label: group.id, title: right ? `${left?.title} | ${right.title}` : left?.title || "新标签页",
+      leftTitle: left?.title || "新标签页", rightTitle: right?.title,
+      split: isSplit(layout), focused: isSplit(layout) ? layout.focused : "left",
+      loading: left?.loading || right?.loading,
+      error: left?.error || right?.error, errorLabel: left?.error ? left.label : right?.error ? right.label : null };
+  });
   const latestRevision = useRef(-1);
   const [maximized, setMaximized] = useState(false);
   const [updateReady, setUpdateReady] = useState(false);
@@ -23,6 +34,10 @@ export default function App() {
   const tabScroll = useRef<HTMLDivElement>(null);
   const focusAfterClose = useRef<string | null>(null);
   const newTabButton = useRef<HTMLButtonElement>(null);
+  const splitLock = useRef(false);
+  const [splitBusy, setSplitBusy] = useState(false);
+  const split = isSplit(snapshot.layout);
+  const toolbarTab = active ?? tabs[0]?.label;
 
   const reportError = useCallback((context: string, reason: unknown, retry?: () => void) => {
     setError({ message: `${context}：${errorMessage(reason)}`, retry });
@@ -177,14 +192,18 @@ export default function App() {
         <div className="tab-workspace">
           <div className="tab-scroll" ref={tabScroll} role="tablist" aria-label="打开的文档" aria-describedby="tab-help" data-tauri-drag-region>
             {tabs.map((tab) => (
-              <div className={`tab ${tab.label === active ? "active" : ""}`} key={tab.label} role="presentation"
+              <div className={`tab ${tab.label === active ? "active" : ""} ${tab.split ? "split-tab" : ""}`} key={tab.label} role="presentation"
                 onMouseDown={(event) => { if (event.button === 1) { event.preventDefault(); closeTab(tab.label); } }}>
                 <button type="button" role="tab" className="tab-select" aria-selected={tab.label === active}
-                  tabIndex={tab.label === active && !error ? 0 : -1} title={tab.title} aria-label={tab.title}
+                  tabIndex={tab.label === toolbarTab && !error ? 0 : -1} title={tab.title} aria-label={`${tab.title}${tab.split ? "，分屏标签" : ""}${tab.error ? `，${tab.error}` : ""}`}
                   ref={(element) => { if (element) tabButtons.current.set(tab.label, element); else tabButtons.current.delete(tab.label); }}
                   onKeyDown={(event) => navigateTabs(event, tab.label)} onClick={() => activateTab(tab.label)}>
-                  <span className="tab-title">{tab.title}</span>
+                  {tab.split && <svg className="tab-split-icon" aria-hidden="true" width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4"><rect x="2" y="3" width="16" height="14" rx="2"/><path d="M10 3v14"/></svg>}
+                  <span className={`tab-title ${tab.focused === "left" ? "focused-title" : ""}`}>{tab.leftTitle}</span>
+                  {tab.rightTitle && <><span className="tab-title-divider" aria-hidden="true"/><span className={`tab-title ${tab.focused === "right" ? "focused-title" : ""}`}>{tab.rightTitle}</span></>}
+                  {tab.loading && <span className="tab-loading" aria-label="加载中"/>}
                 </button>
+                {tab.error && <button type="button" className="tab-close tab-load-error" title={`${tab.error}；点击重试`} aria-label="重试加载页面" onClick={() => { void perform("无法重试", () => invoke("reload_tab", { label: tab.errorLabel })); }}>↻</button>}
                 <button type="button" className="tab-close" aria-label={`关闭 ${tab.title}`} title={`关闭 ${tab.title}`}
                   tabIndex={tab.label === active && !error ? 0 : -1} onClick={(event) => closeTab(tab.label, event.detail === 0)}>
                   <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12"><path d="M2 2 L10 10 M10 2 L2 10" stroke="currentColor" strokeWidth="1.3" /></svg>
@@ -204,6 +223,21 @@ export default function App() {
         <button type="button" className="newtab" ref={newTabButton} onClick={newTab} title="新建标签页" aria-label="新建标签页">
           <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12"><path d="M6 1.5 V10.5 M1.5 6 H10.5" stroke="currentColor" strokeWidth="1.3" /></svg>
         </button>
+        <div className={`split-controls ${split ? "on" : ""}`}>
+          <button type="button" className="split-toggle" aria-pressed={split} disabled={splitBusy || !tabs.length}
+            title={split ? "退出分屏" : snapshot.viewport.canSplit ? "分屏浏览" : "分屏浏览（请先扩大窗口）"}
+            aria-label={split ? "退出分屏" : "分屏浏览"}
+            onClick={() => {
+              if (splitLock.current) return;
+              splitLock.current = true; setSplitBusy(true);
+              void perform("无法切换分屏", () => invoke("set_split", { enabled: !split }))
+                .finally(() => { splitLock.current = false; setSplitBusy(false); });
+            }}>
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="2" y="3" width="16" height="14" rx="2"/><path d="M10 3v14"/></svg>
+            <span>分屏</span>
+          </button>
+
+        </div>
         <button type="button" className={`settings-btn ${updateReady ? "dot" : ""}`}
           onClick={() => { void perform("无法打开设置", () => invoke("open_settings", { tab: updateReady ? "about" : "font" })); }}
           title={updateReady ? "设置：有更新待处理" : "设置"} aria-label={updateReady ? "设置：有更新待处理" : "设置"}>
