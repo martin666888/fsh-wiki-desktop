@@ -1,3 +1,4 @@
+mod downloads;
 mod fonts;
 mod layout;
 mod native;
@@ -128,6 +129,7 @@ pub fn run() {
         .manage(updates::UpdateState::new())
         .manage(SettingsState::default())
         .manage(tabs::TabState::default())
+        .manage(downloads::DownloadState::default())
         .manage(power::PowerState::default())
         .manage(fonts::FontState::new())
         .invoke_handler(tauri::generate_handler![

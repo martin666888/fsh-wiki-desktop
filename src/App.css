@@ -39,4 +39,6 @@ button:focus-visible, select:focus-visible, [tabindex="0"]:focus-visible { outli
 .bar-error-text { flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; white-space: nowrap; user-select: text; }
 .bar-error-text::-webkit-scrollbar { height: 0; }
 .bar-error button { flex: 0 0 auto; background: transparent; color: #8f1d24; border: none; padding: 3px; cursor: pointer; }
+.bar-notice { border-color: #a5b8ce; background: #f0f5fa; color: #29496b; }
+.bar-notice button { color: inherit; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; } }

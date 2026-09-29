@@ -60,7 +60,12 @@ fn check(app: &AppHandle) {
             .iter()
             .filter_map(|tab| {
                 let since = hidden.get_mut(&tab.label)?;
-                due(since, now, tab.loading).then(|| tab.label.clone())
+                due(
+                    since,
+                    now,
+                    tab.loading || crate::downloads::active(app, &tab.label),
+                )
+                .then(|| tab.label.clone())
             })
             .collect::<Vec<_>>()
     };

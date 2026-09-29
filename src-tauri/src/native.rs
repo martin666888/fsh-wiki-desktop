@@ -21,6 +21,7 @@ pub(crate) async fn attach(webview: &tauri::Webview) -> Result<(), String> {
                 unsafe {
                     let controller = platform.controller();
                     let view = controller.CoreWebView2()?;
+                    crate::downloads::attach(&view, &app, &label)?;
                     let focus_app = app.clone();
                     let focus_label = label.clone();
                     let mut token = 0;

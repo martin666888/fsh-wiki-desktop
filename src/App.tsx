@@ -9,7 +9,7 @@ import "./App.css";
 
 const DEFAULT_URL = "https://www.feishu.cn/drive/home/";
 
-interface BarError { message: string; retry?: () => void; }
+interface BarError { message: string; retry?: () => void; informational?: boolean; }
 
 export default function App() {
   const [snapshot, setSnapshot] = useState<TabsSnapshot>(EMPTY_SNAPSHOT);
@@ -121,6 +121,15 @@ export default function App() {
     }).then(track).catch((reason) => {
       if (!disposed) reportError("无法监听操作提示", reason, retry);
     });
+    void listen<unknown>("ui-notice", (event) => {
+      const payload = event.payload as { message?: unknown } | null;
+      if (!disposed && payload && typeof payload.message === "string" && payload.message.length <= 16384) {
+        const message = payload.message;
+        setError(current => current && !current.informational ? current : { message, informational: true });
+      }
+    }).then(track).catch((reason) => {
+      if (!disposed) reportError("无法监听下载提示", reason, retry);
+    });
     return () => { disposed = true; unlisteners.forEach((unlisten) => unlisten()); };
   }, [connectionAttempt, reportError]);
 
@@ -211,10 +220,10 @@ export default function App() {
               </div>
             ))}
           </div>
-          {error && <div className="bar-error">
-            <span className="bar-error-text" role="alert" tabIndex={0} title={error.message}>{error.message}</span>
+          {error && <div className={`bar-error${error.informational ? " bar-notice" : ""}`}>
+            <span className="bar-error-text" role={error.informational ? "status" : "alert"} tabIndex={0} title={error.message}>{error.message}</span>
             {error.retry && <button type="button" onClick={error.retry}>重试</button>}
-            <button type="button" aria-label="关闭错误提示" title="关闭错误提示" onClick={() => {
+            <button type="button" aria-label="关闭提示" title="关闭提示" onClick={() => {
               setError(null);
               requestAnimationFrame(() => { (active ? tabButtons.current.get(active) : newTabButton.current)?.focus(); });
             }}>×</button>

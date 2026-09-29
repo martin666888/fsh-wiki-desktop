@@ -11,6 +11,7 @@
 - 西文、中文、代码字体分别设置，只改变本地显示，不修改文档。代码与图标子树单独保护；关闭字体后，已有标签重新导航同样清除覆盖样式。
 - 飞书/Lark 域的标准 HTTPS 链接在应用内打开；其他 HTTP/HTTPS 链接交给系统浏览器。带用户名密码的 URL、文件链接及未知协议不交给系统执行。
 - `target="_blank"` 由原生新窗口回调分流，内部文档打开为标签。WebView2 默认右键菜单被拦截，飞书页面自己的菜单继续由页面处理。
+- 文档菜单“下载为”（Word / PDF / Markdown）及附件下载沿用 WebView2 的默认下载目录和下载行为；标签栏增加开始、完成、取消或失败提示，完成时显示实际保存路径（包含重名时自动调整的文件名）。下载期间该页面不进入闲置休眠，结束后重新计时。
 - 单实例：再次启动时还原并激活已有主窗口。开发版与安装版共用应用标识，会相互排斥。
 - 更新可自动检查、可选自动下载，安装始终需要点击「重启并安装」。
 
@@ -78,12 +79,14 @@ npm run check
 npm run check:rust
 ```
 
-- `check:project`：核对 npm、Cargo、Tauri、两份锁文件的版本，并检查 CSP、远程权限与签名发布配置。指定 tag 可运行 `npm run check:project -- --tag v0.1.14`。
+- `check:project`：核对 npm、Cargo、Tauri、两份锁文件的版本，并检查 CSP、远程权限与签名发布配置。指定 tag 可运行 `npm run check:project -- --tag v0.1.15`。
 - `check:signatures`：使用 Node 内置 `assert/crypto` 和公开签名向量验证 Ed/ED 兼容、bytes 与可信注释篡改拒绝、版本绑定和稳定版顺序，不使用私钥或可执行安装器。
 - `check`：依次执行上述脚本及 TypeScript/Vite 构建。
 - `check:rust`：依次运行 Rust 格式检查、锁定依赖检查、严格 Clippy 和 Rust 自带的单元测试。已有依赖齐全时，可单独运行 cargo check/clippy/test 并增加 `--offline`。
 
 没有引入第三方测试框架。GitHub 的常规提交/PR 检查使用相同命令；这些检查不能替代真实飞书登录、混合 DPI、读屏器与真实安装升级验收。原生操作验证应使用独立测试账户和临时数据目录，避免影响日常安装版。
+
+下载状态可用 `cargo run --manifest-path src-tauri/Cargo.toml --example download-smoke` 做 Windows 原生回归，追加 `-- --auto` 可自动验证 HTTP 附件下载、文件内容及下载活动计数释放。测试窗口使用临时 WebView2 配置及本机回环 HTTP 页面，下载到 `.local-artifacts/download-smoke-output/`，不连接飞书、不读取正式登录信息。点击各格式按钮并重复下载，检查开始/完成提示、实际路径和重名文件；这些文件是用于校验传输的测试文本，并非有效的 Office/PDF 文档。此检查不能替代真实飞书菜单导出验收。
 
 ## 构建与签名
 
@@ -110,7 +113,7 @@ Tauri 2 的 NSIS 更新产物是安装器与签名，无需 v1 的 `.nsis.zip` �
 准备新版本时同步修改 `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json`，再更新 `package-lock.json` 和 `src-tauri/Cargo.lock` 中对应的应用版本。不得只改 tag。先验证待发布版本，例如：
 
 ```powershell
-npm run check:project -- --tag v0.1.14
+npm run check:project -- --tag v0.1.15
 npm run check
 npm run check:rust
 ```
