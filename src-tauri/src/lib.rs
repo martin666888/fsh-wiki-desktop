@@ -2,6 +2,7 @@ mod fonts;
 mod layout;
 mod native;
 mod navigation;
+mod power;
 mod storage;
 mod tabs;
 mod updates;
@@ -127,6 +128,7 @@ pub fn run() {
         .manage(updates::UpdateState::new())
         .manage(SettingsState::default())
         .manage(tabs::TabState::default())
+        .manage(power::PowerState::default())
         .manage(fonts::FontState::new())
         .invoke_handler(tauri::generate_handler![
             tabs::create_tab,
@@ -215,6 +217,7 @@ pub fn run() {
                 }
             });
             updates::restore_pending_on_boot(&handle);
+            power::start(handle.clone());
             #[cfg(not(debug_assertions))]
             updates::spawn_update_boot(handle);
             Ok(())

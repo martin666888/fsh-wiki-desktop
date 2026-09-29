@@ -98,6 +98,7 @@ pub(crate) fn focused(app: &AppHandle, label: &str) {
 }
 
 pub(crate) fn navigation_started(app: &AppHandle, label: &str, id: u64) {
+    crate::power::navigation(app, label);
     let state = app.state::<TabState>();
     let mut snap = state.snapshot.lock().unwrap();
     if let Some(tab) = snap.tabs.iter_mut().find(|tab| tab.label == label) {
@@ -112,6 +113,7 @@ pub(crate) fn navigation_started(app: &AppHandle, label: &str, id: u64) {
 }
 
 pub(crate) fn navigation_finished(app: &AppHandle, label: &str, id: u64, error: Option<String>) {
+    crate::power::navigation(app, label);
     let state = app.state::<TabState>();
     let mut snap = state.snapshot.lock().unwrap();
     if let Some(tab) = snap.tabs.iter_mut().find(|tab| tab.label == label) {
@@ -185,6 +187,7 @@ fn apply_on_ui(app: &AppHandle, focus: Focus) -> Result<(), String> {
         };
         if !shown {
             webview.hide().map_err(|e| e.to_string())?;
+            crate::power::visibility(app, &tab.label, false);
             continue;
         }
         let header = if suspended { PANE_HEADER_HEIGHT } else { 0.0 };
@@ -204,6 +207,7 @@ fn apply_on_ui(app: &AppHandle, focus: Focus) -> Result<(), String> {
             height - header - border,
         )?;
         webview.show().map_err(|e| e.to_string())?;
+        crate::power::visibility(app, &tab.label, true);
     }
     match focus {
         Focus::Keep => {}

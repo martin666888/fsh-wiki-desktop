@@ -5,6 +5,7 @@
 ## 功能与边界
 
 - 每个页面使用独立 WebView，切换时隐藏而不销毁，保留当前页面状态。标签列表独立滚动，窗口控制按钮固定可达；支持中键关闭与键盘操作。
+- 后台页面连续闲置 10 分钟后自动尝试休眠（每 30 秒检查），切回时由 WebView2 自动唤醒，不重新加载文档。可见的分屏页面不休眠，导航和加载会重置等待时间。休眠保留页面实例，但会暂停脚本与定时器，协作更新可能等到唤醒后恢复；浏览器拒绝休眠时稍后再试，不强制卸载页面。实际内存回收由 WebView2 和系统决定。
 - 顶部「分屏」支持单页、左侧文章加右侧选页、左右双文档三种状态。复用原标签的 WebView，分屏、切换和退出均不重新导航页面。
 - 无边框主窗口支持拖动、双击最大化和窗口控制；设置窗口复用时可从最小化恢复，关闭主窗口会同时关闭设置窗口。
 - 西文、中文、代码字体分别设置，只改变本地显示，不修改文档。代码与图标子树单独保护；关闭字体后，已有标签重新导航同样清除覆盖样式。
@@ -77,7 +78,7 @@ npm run check
 npm run check:rust
 ```
 
-- `check:project`：核对 npm、Cargo、Tauri、两份锁文件的版本，并检查 CSP、远程权限与签名发布配置。指定 tag 可运行 `npm run check:project -- --tag v0.1.13`。
+- `check:project`：核对 npm、Cargo、Tauri、两份锁文件的版本，并检查 CSP、远程权限与签名发布配置。指定 tag 可运行 `npm run check:project -- --tag v0.1.14`。
 - `check:signatures`：使用 Node 内置 `assert/crypto` 和公开签名向量验证 Ed/ED 兼容、bytes 与可信注释篡改拒绝、版本绑定和稳定版顺序，不使用私钥或可执行安装器。
 - `check`：依次执行上述脚本及 TypeScript/Vite 构建。
 - `check:rust`：依次运行 Rust 格式检查、锁定依赖检查、严格 Clippy 和 Rust 自带的单元测试。已有依赖齐全时，可单独运行 cargo check/clippy/test 并增加 `--offline`。
@@ -109,7 +110,7 @@ Tauri 2 的 NSIS 更新产物是安装器与签名，无需 v1 的 `.nsis.zip` �
 准备新版本时同步修改 `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json`，再更新 `package-lock.json` 和 `src-tauri/Cargo.lock` 中对应的应用版本。不得只改 tag。先验证待发布版本，例如：
 
 ```powershell
-npm run check:project -- --tag v0.1.13
+npm run check:project -- --tag v0.1.14
 npm run check
 npm run check:rust
 ```
