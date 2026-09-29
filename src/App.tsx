@@ -6,10 +6,11 @@ import { errorMessage } from "./feedback";
 import { isUpdateStatus, needsAttention } from "./update";
 import { EMPTY_SNAPSHOT, isSplit, isTabsSnapshot, type TabsSnapshot } from "./tabs";
 import "./App.css";
+import { DownloadNotice } from "./DownloadNotice";
 
 const DEFAULT_URL = "https://www.feishu.cn/drive/home/";
 
-interface BarError { message: string; retry?: () => void; informational?: boolean; }
+interface BarError { message: string; retry?: () => void; }
 
 export default function App() {
   const [snapshot, setSnapshot] = useState<TabsSnapshot>(EMPTY_SNAPSHOT);
@@ -29,6 +30,8 @@ export default function App() {
   const [maximized, setMaximized] = useState(false);
   const [updateReady, setUpdateReady] = useState(false);
   const [error, setError] = useState<BarError | null>(null);
+  const [notice, setNotice] = useState<{ message: string } | null>(null);
+  const dismissNotice = useCallback(() => setNotice(null), []);
   const [connectionAttempt, setConnectionAttempt] = useState(0);
   const tabButtons = useRef(new Map<string, HTMLButtonElement>());
   const tabScroll = useRef<HTMLDivElement>(null);
@@ -124,8 +127,7 @@ export default function App() {
     void listen<unknown>("ui-notice", (event) => {
       const payload = event.payload as { message?: unknown } | null;
       if (!disposed && payload && typeof payload.message === "string" && payload.message.length <= 16384) {
-        const message = payload.message;
-        setError(current => current && !current.informational ? current : { message, informational: true });
+        setNotice({ message: payload.message });
       }
     }).then(track).catch((reason) => {
       if (!disposed) reportError("无法监听下载提示", reason, retry);
@@ -220,8 +222,8 @@ export default function App() {
               </div>
             ))}
           </div>
-          {error && <div className={`bar-error${error.informational ? " bar-notice" : ""}`}>
-            <span className="bar-error-text" role={error.informational ? "status" : "alert"} tabIndex={0} title={error.message}>{error.message}</span>
+          {error && <div className="bar-error">
+            <span className="bar-error-text" role="alert" tabIndex={0} title={error.message}>{error.message}</span>
             {error.retry && <button type="button" onClick={error.retry}>重试</button>}
             <button type="button" aria-label="关闭提示" title="关闭提示" onClick={() => {
               setError(null);
@@ -232,6 +234,10 @@ export default function App() {
         <button type="button" className="newtab" ref={newTabButton} onClick={newTab} title="新建标签页" aria-label="新建标签页">
           <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12"><path d="M6 1.5 V10.5 M1.5 6 H10.5" stroke="currentColor" strokeWidth="1.3" /></svg>
         </button>
+        {notice && <DownloadNotice notice={notice} onDismiss={dismissNotice} onClose={() => {
+          dismissNotice();
+          (active ? tabButtons.current.get(active) : newTabButton.current)?.focus();
+        }} />}
         <div className={`split-controls ${split ? "on" : ""}`}>
           <button type="button" className="split-toggle" aria-pressed={split} disabled={splitBusy || !tabs.length}
             title={split ? "退出分屏" : snapshot.viewport.canSplit ? "分屏浏览" : "分屏浏览（请先扩大窗口）"}

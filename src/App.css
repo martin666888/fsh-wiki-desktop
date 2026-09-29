@@ -39,6 +39,9 @@ button:focus-visible, select:focus-visible, [tabindex="0"]:focus-visible { outli
 .bar-error-text { flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; white-space: nowrap; user-select: text; }
 .bar-error-text::-webkit-scrollbar { height: 0; }
 .bar-error button { flex: 0 0 auto; background: transparent; color: #8f1d24; border: none; padding: 3px; cursor: pointer; }
-.bar-notice { border-color: #a5b8ce; background: #f0f5fa; color: #29496b; }
-.bar-notice button { color: inherit; }
+.download-notice { display: flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; max-width: min(360px, 30vw); height: 28px; padding: 0 6px 0 10px; border: 1px solid #c7d2df; border-radius: 6px; background: #f5f8fb; color: #36516e; font-size: 12px; opacity: 1; transition: opacity 250ms ease; }
+.download-notice.fading { opacity: 0; }
+.download-notice-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
+.download-notice button { flex: 0 0 auto; width: 20px; height: 22px; border: 0; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
+.download-notice button:hover { background: #e3eaf2; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; } }

@@ -79,8 +79,6 @@ export function statusDetail(s: UpdateStatus): string | null {
   switch (s.kind) {
     case "upToDate":
       return `上次检查 ${new Date(s.checked_at).toLocaleTimeString()}`;
-    case "available":
-      return "下载后由你决定什么时候安装";
     case "downloading": {
       const pct = downloadPercent(s);
       if (pct !== null) return `${pct}%`;
