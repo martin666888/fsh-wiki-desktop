@@ -140,7 +140,8 @@ jobs:
           app="$bundle/macos/飞书文档轻客户端.app"
           dmg="$bundle/dmg/飞书文档轻客户端_${RELEASE_TAG#v}_universal.dmg"
           test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Contents/Info.plist")" = "${RELEASE_TAG#v}"
-          lipo -verify_arch arm64 x86_64 "$app/Contents/MacOS/feishu-desktop"
+          architectures="$(lipo -archs "$app/Contents/MacOS/feishu-desktop")"
+          [[ " $architectures " == *" arm64 "* && " $architectures " == *" x86_64 "* ]]
           codesign --verify --deep --strict "$app"
           hdiutil verify "$dmg"
           test "$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --jq '.draft')" = true
