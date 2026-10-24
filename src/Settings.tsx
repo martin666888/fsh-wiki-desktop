@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { IS_MACOS } from "./platform";
 import { errorMessage } from "./feedback";
 import {
   DEFAULT_PREFS, downloadPercent, isUpdateStatus, statusDetail, statusTitle,
@@ -218,14 +219,15 @@ export default function Settings() {
   const percent = downloadPercent(status);
   const detail = statusDetail(status);
   const fontDisabled = !fontReady || fontSaving;
-  const prefsDisabled = !prefsReady || prefsSaving || installing;
+  const prefsDisabled = IS_MACOS || !prefsReady || prefsSaving || installing;
   const bodyChain = `${JSON.stringify(cfg.en)}, ${JSON.stringify(cfg.cn)}, sans-serif`;
   const monoChain = `${JSON.stringify(cfg.mono)}, Consolas, monospace`;
-  const announcement = !statusReady ? "正在读取更新状态" :
+  const announcement = IS_MACOS ? "Mac 版请下载新版 DMG 并替换应用" : !statusReady ? "正在读取更新状态" :
     status.kind === "error" ? `更新出错：${status.message}` :
     status.kind === "downloaded" && status.notice ? `${statusTitle(status)}。${status.notice}` : statusTitle(status);
 
   const updateAction = () => {
+    if (IS_MACOS) return null;
     if (!statusReady) return <button type="button" className="btn" disabled>读取中…</button>;
     if (installing) return <button type="button" className="btn" disabled>正在安装…</button>;
     if (status.kind === "checking" || status.kind === "downloading") {
@@ -289,7 +291,7 @@ export default function Settings() {
         <div className="grp"><div className="row"><span className="row-t">当前版本</span><span className="row-v">{version || "…"}</span></div></div>
         <div className="grp">
           <div className="row update-row">
-            <div className="row-txt"><span className="row-t">{statusReady ? statusTitle(status) : "正在读取更新状态…"}</span>{detail && <span className="row-d">{detail}</span>}</div>
+            <div className="row-txt"><span className="row-t">{IS_MACOS ? "手动更新" : statusReady ? statusTitle(status) : "正在读取更新状态…"}</span>{IS_MACOS ? <span className="row-d">下载新版 DMG 并替换应用</span> : detail && <span className="row-d">{detail}</span>}</div>
             {updateAction()}
           </div>
           {status.kind === "downloading" && <div className="row prog-row">
@@ -299,7 +301,7 @@ export default function Settings() {
             </div>
           </div>}
         </div>
-        <div className="grp" aria-busy={prefsSaving}>
+        <div className="grp" aria-busy={prefsSaving} hidden={IS_MACOS}>
           <div className="row">
             <div className="row-txt"><span className="row-t" id="auto-check-label">启动时检查更新</span><span className="row-d" id="auto-check-description">打开应用时在后台检查新版本</span></div>
             <Toggle checked={prefs.autoCheck} disabled={prefsDisabled} labelledBy="auto-check-label" describedBy="auto-check-description"

@@ -1,10 +1,17 @@
 //! WebView2-only adapters. Remote pages never receive application IPC permissions.
-use crate::{
-    layout::{Layout, DIVIDER_WIDTH},
-    tabs::{self, TabState},
-};
-use std::{sync::atomic::Ordering, time::Duration};
+use crate::{layout::Layout, tabs::TabState};
+#[cfg(windows)]
+use crate::{layout::DIVIDER_WIDTH, tabs};
+use std::sync::atomic::Ordering;
+#[cfg(windows)]
+use std::time::Duration;
 use tauri::{AppHandle, Manager};
+
+// Feishu's WebKit/Safari bundle currently overwrites a required homepage module
+// with a reduced preload module. Request the working modern bundle instead;
+// the rendering engine remains WKWebView and remote pages keep their IPC limits.
+#[cfg(target_os = "macos")]
+pub(crate) const DOCUMENT_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 #[cfg(windows)]
 pub(crate) async fn attach(webview: &tauri::Webview) -> Result<(), String> {
@@ -92,7 +99,13 @@ pub(crate) async fn attach(webview: &tauri::Webview) -> Result<(), String> {
     receive.await.map_err(|_| "文档窗口已关闭".to_string())?
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+pub(crate) async fn attach(_: &tauri::Webview) -> Result<(), String> {
+    // WKWebView uses the portable page-load callbacks registered in tabs.rs.
+    Ok(())
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 pub(crate) async fn attach(_: &tauri::Webview) -> Result<(), String> {
     Err("分屏文档目前仅支持 Windows WebView2".into())
 }

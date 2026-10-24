@@ -22,6 +22,18 @@ const SETTINGS_H: f64 = 480.0;
 const NO_DEFAULT_MENU_JS: &str =
     r#"document.addEventListener("contextmenu", function (e) { e.preventDefault(); }, true);"#;
 
+#[cfg(target_os = "macos")]
+static MAC_DATA_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+#[cfg(target_os = "macos")]
+fn data_dir() -> PathBuf {
+    MAC_DATA_DIR
+        .get()
+        .expect("application data directory initialized")
+        .clone()
+}
+
+#[cfg(not(target_os = "macos"))]
 fn data_dir() -> PathBuf {
     std::env::current_exe()
         .ok()
@@ -126,12 +138,10 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .manage(updates::UpdateState::new())
         .manage(SettingsState::default())
         .manage(tabs::TabState::default())
         .manage(downloads::DownloadState::default())
         .manage(power::PowerState::default())
-        .manage(fonts::FontState::new())
         .invoke_handler(tauri::generate_handler![
             tabs::create_tab,
             tabs::close_tab,
@@ -161,6 +171,21 @@ pub fn run() {
             updates::cancel_update
         ])
         .setup(|app| {
+            // A signed .app bundle must remain immutable. User files belong in
+            // Application Support, outside both the bundle and the mounted DMG.
+            #[cfg(target_os = "macos")]
+            {
+                let mut directory = app.path().app_data_dir()?;
+                if cfg!(debug_assertions) {
+                    directory = directory.join("debug");
+                }
+                std::fs::create_dir_all(&directory)?;
+                MAC_DATA_DIR
+                    .set(directory)
+                    .expect("data directory initialized once");
+            }
+            app.manage(updates::UpdateState::new());
+            app.manage(fonts::FontState::new());
             let handle = app.handle().clone();
             let window = tauri::WindowBuilder::new(app, "main")
                 .title("飞书文档")
@@ -220,7 +245,7 @@ pub fn run() {
             });
             updates::restore_pending_on_boot(&handle);
             power::start(handle.clone());
-            #[cfg(not(debug_assertions))]
+            #[cfg(all(windows, not(debug_assertions)))]
             updates::spawn_update_boot(handle);
             Ok(())
         })

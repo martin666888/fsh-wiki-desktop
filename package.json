@@ -1,7 +1,7 @@
 {
   "name": "feishu-desktop",
   "private": true,
-  "version": "0.1.16",
+  "version": "0.1.17",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -14,7 +14,8 @@
     "check:rust": "cargo fmt --manifest-path src-tauri/Cargo.toml -- --check && cargo check --manifest-path src-tauri/Cargo.toml --locked && cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml --locked",
     "release:prepare": "node scripts/release.mjs prepare",
     "release:manifest": "node scripts/release.mjs manifest",
-    "release:publish": "node scripts/release.mjs publish"
+    "release:publish": "node scripts/release.mjs publish",
+    "build:mac": "tauri build --ci --bundles app,dmg -- --locked"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",

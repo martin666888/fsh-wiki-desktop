@@ -4,7 +4,7 @@
 
 ## 项目与入口
 
-这是飞书文档的 Windows 桌面客户端，使用 Tauri 2、React 18、TypeScript、Vite 和系统 WebView2。Rust 管理原生窗口、页面和持久化；React 提供本地标签栏、工作区和设置界面。详细功能、数据目录和发布步骤见 [README.md](README.md)。
+这是飞书文档的桌面客户端，使用 Tauri 2、React 18、TypeScript 和 Vite；Windows 使用系统 WebView2，macOS 使用系统 WKWebView。Rust 管理原生窗口、页面和持久化；React 提供本地标签栏、工作区和设置界面。详细功能、数据目录和发布步骤见 [README.md](README.md)。
 
 | 范围 | 入口 |
 | --- | --- |
@@ -17,7 +17,7 @@
 | 权限与打包配置 | `src-tauri/capabilities/`、`src-tauri/tauri.conf.json` |
 | 项目检查、签名验证、发布 | `scripts/`、`.github/workflows/` |
 
-开发环境为 Windows、Node.js 22 或更高版本、Rust stable、Windows C++ 构建工具及 WebView2 Runtime。依赖安装使用 `npm ci`，启动桌面开发环境使用 `npm run tauri dev`。开发版与安装版共用单实例标识，启动开发版前先退出安装版。
+开发环境需要 Node.js 22 或更高版本和 Rust stable；Windows 需要 Windows C++ 构建工具及 WebView2 Runtime，Mac 需要 Xcode Command Line Tools。依赖安装使用 `npm ci`，启动桌面开发环境使用 `npm run tauri dev`。开发版与安装版共用单实例标识，启动开发版前先退出安装版。
 
 ## 目录用途与验证版
 
@@ -51,13 +51,17 @@
 - **隔离范围**：普通人工试用复用 debug 程序和它自己的数据目录；自动化回归使用临时配置或独立夹具。只有确有并行运行、独立身份或特殊配置需求时才使用额外构建覆盖，不默认改应用标识、复制可执行文件或建立另一套工程。
 - **交付前**：确认构建退出成功、实际输出路径和文件更新时间。程序正在运行时不要强行覆盖或结束用户进程；不删除、搬移、覆盖已有登录数据。不把旧二进制当成本次修改的验证版。
 
+### Mac 验证与安装包
+
+Mac 上运行 `npm run build:mac`，生成 `src-tauri/target/release/bundle/macos/` 下的 `.app` 和 `bundle/dmg/` 下的 `.dmg`。该命令嵌入前端资源；不得交付 Windows `.exe` 或仅 Vite 构建作为 Mac 验证版。平台配置为 `src-tauri/tauri.macos.conf.json`，本地包采用 ad-hoc 签名，不生成 Windows 更新产物。签名、公证、通用包命令和当前平台差异见 README。
+
 ## 架构与数据边界
 
 - 保持现有 Tauri、React 和多 WebView 架构。Rust 保存标签与布局状态，通过命令和事件向本地界面提供快照；不要在前端维护另一套独立的权威状态。
 - 远程飞书页面不授予本地 IPC 权限。新增命令须同时检查 `build.rs` 和对应 capability，只开放调用方实际需要的能力。
 - 切换标签和调整分屏复用现有页面。除明确的导航、刷新或关闭操作外，不通过重建 WebView 改变页面状态。
 - WebView 增删命令保持异步；原生窗口与布局更新遵守主线程要求。修改前确认锁、回调和事件之间的调用顺序。
-- 运行数据位于可执行文件旁的 `data/`，包含配置、更新缓存和登录状态。本地原生验证使用独立临时数据，不读取或改写日常安装版的数据。
+- Windows 运行数据位于可执行文件旁的 `data/`；Mac 配置位于用户 Application Support，网站数据由 WKWebView 持久化管理，具体路径和开发版隔离范围见 README。本地原生验证使用独立临时数据，不读取或改写日常安装版的数据。
 - 保留原有更新签名公钥及私钥，不为修复或发版重新生成密钥。安装前的签名与版本验证、原子写入及失败时保留有效数据的行为不得省略。
 - 保留已有工作区改动、锁文件、资源及许可证。凭据、登录数据、依赖、构建输出和 `.local-artifacts/` 不入库。不顺手升级依赖、调整版本、重构无关模块或安装新版本。
 

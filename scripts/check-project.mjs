@@ -63,6 +63,10 @@ export function checkProject(tag = undefined) {
   }
   assert.equal(config.bundle?.createUpdaterArtifacts, true, "发布必须生成签名更新产物");
   assert.deepEqual(config.bundle?.targets, ["nsis"], "当前发布校验仅支持一个 NSIS 安装器");
+  const macConfig = readJson("src-tauri/tauri.macos.conf.json");
+  assert.deepEqual(macConfig.bundle?.targets, ["app", "dmg"], "Mac 构建必须生成应用与磁盘映像");
+  assert.equal(macConfig.bundle?.createUpdaterArtifacts, false, "Mac 版暂不接入 Windows 更新通道");
+  assert.ok(!macConfig.plugins?.updater, "Mac 配置不能替换既有更新公钥");
   assert.ok(config.plugins?.updater?.pubkey?.trim(), "缺少更新公钥");
   assert.ok(config.plugins.updater.endpoints?.length, "缺少更新入口");
   for (const endpoint of config.plugins.updater.endpoints) {

@@ -1,6 +1,6 @@
 # 飞书文档轻客户端
 
-将飞书文档网页版封装为 Windows 桌面窗口。基于 Tauri 2、React 与系统 WebView2，支持多标签、自定义显示字体和分阶段更新。运行数据保存在安装目录的 `data\` 中。
+将飞书文档网页版封装为桌面窗口。基于 Tauri 2、React，Windows 使用系统 WebView2，macOS 使用系统 WKWebView。支持多标签、分屏和自定义显示字体；Windows 提供分阶段更新，Mac 版使用 DMG 手动安装与更新。
 
 ## 功能与边界
 
@@ -53,7 +53,11 @@
 
 配置和更新缓存采用同目录临时文件写完、同步后替换，失败保留原文件。旧版本的独立 `pending-*.exe` 没有保存完整验证信息，新版本不会直接信任或安装它们，也不会自动删除；需要重新下载一次更新。
 
-## 更新
+### macOS 数据
+
+Mac 配置文件保存在 `~/Library/Application Support/com.webstudy.feishu-desktop/`，开发构建使用该目录下的 `debug/`。应用包和 DMG 内不写入用户数据，替换 `.app` 时保留字体等配置。WKWebView 的登录状态与网页缓存由系统 WebKit 默认持久化存储管理，`data_directory` 不控制它的位置；开发版和安装版可能共用网站登录状态，自动化原生回归须使用独立应用标识或临时网页存储。
+
+## 更新（Windows）
 
 1. 检查：正式构建启动时可自动检查，也可手动触发。已有有效待安装缓存时跳过启动自动检查，避免覆盖「已下载」。开发构建不自动查询线上更新。
 2. 下载：默认手动，可在「关于」中开启自动下载。进度累计所有数据块；总长度未知时显示已下载大小。检查和下载可以取消，检查总超时 30 秒，下载总超时 5 分钟，网络读取停滞也有超时。
@@ -79,7 +83,7 @@ npm run check
 npm run check:rust
 ```
 
-- `check:project`：核对 npm、Cargo、Tauri、两份锁文件的版本，并检查 CSP、远程权限与签名发布配置。指定 tag 可运行 `npm run check:project -- --tag v0.1.16`。
+- `check:project`：核对 npm、Cargo、Tauri、两份锁文件的版本，并检查 CSP、远程权限与签名发布配置。指定 tag 可运行 `npm run check:project -- --tag v0.1.17`。
 - `check:signatures`：使用 Node 内置 `assert/crypto` 和公开签名向量验证 Ed/ED 兼容、bytes 与可信注释篡改拒绝、版本绑定和稳定版顺序，不使用私钥或可执行安装器。
 - `check`：依次执行上述脚本及 TypeScript/Vite 构建。
 - `check:rust`：依次运行 Rust 格式检查、锁定依赖检查、严格 Clippy 和 Rust 自带的单元测试。已有依赖齐全时，可单独运行 cargo check/clippy/test 并增加 `--offline`。
@@ -88,7 +92,46 @@ npm run check:rust
 
 下载状态可用 `cargo run --manifest-path src-tauri/Cargo.toml --example download-smoke` 做 Windows 原生回归，追加 `-- --auto` 可自动验证 HTTP 附件下载、文件内容及下载活动计数释放。测试窗口使用临时 WebView2 配置及本机回环 HTTP 页面，下载到 `.local-artifacts/download-smoke-output/`，不连接飞书、不读取正式登录信息。点击各格式按钮并重复下载，检查开始/完成提示、实际路径和重名文件；这些文件是用于校验传输的测试文本，并非有效的 Office/PDF 文档。此检查不能替代真实飞书菜单导出验收。
 
-## 构建与签名
+## macOS 开发与打包
+
+需要 macOS 12 或更高版本、Node.js 22 或更高版本、Rust stable，以及 Xcode Command Line Tools。可用 `xcode-select -p` 检查 Apple 编译工具，用 `cargo --version` 检查 Rust；未安装时分别运行 `xcode-select --install`，并按 [Tauri 环境要求](https://v2.tauri.app/start/prerequisites/) 安装 Rust。
+
+若安装 Rust 后当前终端仍找不到 `cargo`，先运行 `source "$HOME/.cargo/env"`。在项目根目录执行：
+
+```sh
+npm ci
+npm run tauri dev
+```
+
+修改 `src/` 中的界面或 `src-tauri/src/` 中的 Rust 代码后，运行检查并重新打包：
+
+```sh
+npm run check
+npm run check:rust
+npm run build:mac
+```
+
+`tauri.macos.conf.json` 会在 Mac 上自动合并到基础配置，生成当前机器架构的包，不改变 Windows 的 NSIS 发布流程。Apple Silicon Mac 的输出为：
+
+- `src-tauri/target/release/bundle/macos/飞书文档轻客户端.app`
+- `src-tauri/target/release/bundle/dmg/飞书文档轻客户端_0.1.17_aarch64.dmg`
+
+打开 DMG，将应用拖入「应用程序」后启动。后续修改重复检查和打包，再退出旧应用并替换即可；包内已嵌入前端资源，启动不依赖 Vite。Intel Mac 需在 Intel Mac 上构建，或在本机安装对应 Rust target 后构建通用包：
+
+```sh
+rustup target add x86_64-apple-darwin
+npm run tauri -- build --ci --bundles app,dmg --target universal-apple-darwin -- --locked
+```
+
+通用包位于 `src-tauri/target/universal-apple-darwin/release/bundle/`。当前本地包采用 ad-hoc 签名，未经过 Apple 公证。向其他 Mac 分发时，Gatekeeper 可能要求用户在「系统设置 → 隐私与安全性」中允许打开；若要让用户通过 Gatekeeper 直接验证，需要使用自己的 Developer ID Application 证书并完成 Apple 公证，参见 [Tauri macOS 签名指南](https://v2.tauri.app/distribute/sign/macos/)。正式签名可通过 `--config` 覆盖 `bundle.macOS.signingIdentity`，再提供指南中的公证环境变量；它与 Windows 更新签名是两套独立机制。
+
+Mac 的远程飞书页面使用 Chromium 兼容 User-Agent 请求现代网页资源，避免飞书 WebKit/Safari 资源分支的主页初始化模块冲突。实际渲染引擎仍是系统 WKWebView；该兼容标识只用于远程文档页面，Windows 使用 WebView2 的默认标识。
+
+Mac 版当前限制：应用内自动更新、WebView2 闲置休眠、选页缩略图、原生分隔线鼠标拖动及页面焦点跟踪尚未移植。分隔线可获得焦点后用方向键、Home/End、Enter 调整。下载使用 WKWebView 的下载回调保存到系统下载文件夹并显示完成或失败提示，完成回调不提供实际路径。Mac 使用通用页面加载回调，尚无与 WebView2 等价的网络错误分类。真实飞书登录和各格式导出仍需人工验收。
+
+WKWebView 在网页持久化 WebCrypto 密钥时可能请求访问钥匙串中的「应用名称 WebCrypto Master Key」。这是 WebKit 用来加密本地持久化密钥的主密钥，参见 [WebKit 源码](https://github.com/WebKit/WebKit/blob/main/Source/WebCore/platform/LocalizedStrings.cpp#L1412-L1419)。若系统要求密码，通常使用登录钥匙串的密码；该密码一般与 Mac 登录密码相同。重新编译或更换应用身份后可能重新要求授权。拒绝可能影响网页加密密钥的持久化，但不影响构建和打包；本地验证无需为此授予长期访问。
+
+## Windows 构建与签名
 
 `bundle.createUpdaterArtifacts` 保持开启，发布构建必须取得原有签名私钥。公钥在 `tauri.conf.json` 中，私钥及密码保存在仓库之外；不要打印到日志或提交到 Git。
 
@@ -108,19 +151,19 @@ Tauri 2 的 NSIS 更新产物是安装器与签名，无需 v1 的 `.nsis.zip` �
 
 ## 发版流程
 
-推送 `v<SemVer>` tag 会触发 Release 工作流；这一步会对外发布，需要先完成本地检查并获得发版授权。版本与 tag 必须保持一致。
+推送 `v<SemVer>` tag 会触发 Release 工作流；这一步会对外发布，需要先完成本地检查并获得发版授权。版本与 tag 必须保持一致。Release 标题与 tag 相同，例如 `v0.1.17`。
 
-准备新版本时同步修改 `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json`，再更新 `package-lock.json` 和 `src-tauri/Cargo.lock` 中对应的应用版本。不得只改 tag。先验证待发布版本，例如：
+准备新版本时同步修改 `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json`，再更新 `package-lock.json` 和 `src-tauri/Cargo.lock` 中对应的应用版本。不得只改 tag。同步更新 `.github/workflows/release.yml` 中的 `releaseBody` 为该版本的发布说明。先验证待发布版本，例如：
 
 ```powershell
-npm run check:project -- --tag v0.1.16
+npm run check:project -- --tag v0.1.17
 npm run check
 npm run check:rust
 ```
 
 只有源码与锁文件已经全部升级到示例版本，上述 tag 检查才会通过。每次正式发布需高于当前最新稳定版；已公开版本禁止重新上传覆盖。
 
-流水线顺序为：检查源码/版本 → 构建签名安装器并上传 draft → 从 draft 重新下载实际资源 → 验证安装器签名及签名中的版本 → 生成并上传 `latest.json` → 再次下载验证安装器、签名和清单 → 单次操作公开 Release。公开之前失败只留下草稿，稳定入口继续指向上一版。修复后可重跑未公开的草稿。
+流水线顺序为：Windows 检查源码/版本 → 构建签名 NSIS 安装器并上传 draft → 重新下载验签并生成 `latest.json` → Mac 检查源码并构建通用 DMG → 验证版本、双架构、应用签名和磁盘映像 → 上传 DMG 并重新下载比对 → 再次验证 Windows 安装器、签名、清单及 Mac 资源完整性 → 单次操作公开 Release。公开之前失败只留下草稿，稳定入口继续指向上一版。修复后可重跑未公开的草稿。
 
 Release 工作流全局串行；最终公开前再次拒绝低于或等于当前稳定版的任务。包含预发布标识的 tag（如 `v0.2.0-beta.1`）发布为 prerelease，并明确不修改 latest。当前客户端只跟随稳定入口，不自动接收这些预发布版本。
 
@@ -140,6 +183,6 @@ npm run tauri -- signer generate -w ~/.tauri/fsh-wiki.key -p '<密码>'
 
 ## 已知范围
 
-仅发布 Windows x64 NSIS 安装包，依赖可用的 WebView2 Runtime；精简系统或缺少 Runtime 的设备需要安装运行时。字体规则对图标和代码子树做了保护，但飞书页面结构可能改变，应结合真实文档回归。当前没有承诺重启恢复全部已打开标签、离线阅读正文或多账户隔离。
+线上发布提供 Windows x64 NSIS 安装包和 Mac 通用 DMG（Apple Silicon / Intel，macOS 12 及以上）。Mac 采用 ad-hoc 签名、未经过 Apple 公证，使用手动安装更新；`latest.json` 仅服务 Windows 更新。Windows 依赖可用的 WebView2 Runtime；精简系统或缺少 Runtime 的设备需要安装运行时。字体规则对图标和代码子树做了保护，但飞书页面结构可能改变，应结合真实文档回归。当前没有承诺重启恢复全部已打开标签、离线阅读正文或多账户隔离。
 
 公开签名向量的第三方许可见 `scripts/NOTICE-minisign.txt`。

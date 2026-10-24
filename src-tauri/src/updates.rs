@@ -283,6 +283,9 @@ fn read_cache(path: &Path) -> Result<Option<CachedPackage>, String> {
 }
 
 pub fn restore_pending_on_boot(app: &AppHandle) {
+    if !cfg!(windows) {
+        return;
+    }
     let result = (|| {
         let Some(cache) = read_cache(&cache_path())? else {
             return Ok(None);
@@ -365,6 +368,9 @@ pub fn get_update_prefs(app: AppHandle) -> UpdatePrefs {
 
 #[tauri::command]
 pub fn set_update_prefs(app: AppHandle, prefs: UpdatePrefs) -> Result<(), String> {
+    if !cfg!(windows) {
+        return Err("Mac 版请下载新版 DMG 并替换应用，暂不支持应用内更新".into());
+    }
     let state = app.state::<UpdateState>();
     let mut inner = state.0.lock().unwrap();
     let bytes = serde_json::to_vec_pretty(&prefs).map_err(|e| e.to_string())?;
@@ -375,6 +381,9 @@ pub fn set_update_prefs(app: AppHandle, prefs: UpdatePrefs) -> Result<(), String
 
 #[tauri::command]
 pub async fn check_update(app: AppHandle) -> Result<(), String> {
+    if !cfg!(windows) {
+        return Err("Mac 版请下载新版 DMG 并替换应用，暂不支持应用内更新".into());
+    }
     let (id, cancel) = {
         let state = app.state::<UpdateState>();
         let mut inner = state.0.lock().unwrap();
@@ -465,6 +474,9 @@ impl DownloadProgress {
 
 #[tauri::command]
 pub async fn download_update(app: AppHandle) -> Result<(), String> {
+    if !cfg!(windows) {
+        return Err("Mac 版请下载新版 DMG 并替换应用，暂不支持应用内更新".into());
+    }
     download_update_inner(app, None).await
 }
 
@@ -575,6 +587,9 @@ pub fn cancel_update(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn install_update(app: AppHandle) -> Result<(), String> {
+    if !cfg!(windows) {
+        return Err("Mac 版请下载新版 DMG 并替换应用，暂不支持应用内更新".into());
+    }
     let (id, expected_version) = {
         let state = app.state::<UpdateState>();
         let mut inner = state.0.lock().unwrap();
@@ -721,7 +736,7 @@ fn launch_verified_nsis(_: &AppHandle, _: &CachedPackage, _: &[u8], _: &str) -> 
     Err("此应用仅支持 Windows NSIS 更新".into())
 }
 
-#[cfg(not(debug_assertions))]
+#[cfg(all(windows, not(debug_assertions)))]
 pub fn spawn_update_boot(app: AppHandle) {
     let should_check = {
         let state = app.state::<UpdateState>();

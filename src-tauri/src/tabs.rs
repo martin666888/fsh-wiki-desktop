@@ -77,6 +77,7 @@ pub(crate) fn publish(app: &AppHandle) {
 }
 
 /// Native callbacks never acquire the operation mutex or wait for a UI task.
+#[cfg(windows)]
 pub(crate) fn focused(app: &AppHandle, label: &str) {
     let state = app.state::<TabState>();
     if state.arranging.load(Ordering::Acquire) || state.dragging.load(Ordering::Acquire) {
@@ -396,6 +397,15 @@ async fn spawn_tab(
             publish(app);
         })
         .on_page_load(|webview, payload| {
+            #[cfg(target_os = "macos")]
+            match payload.event() {
+                tauri::webview::PageLoadEvent::Started => {
+                    navigation_started(webview.app_handle(), webview.label(), 0);
+                }
+                tauri::webview::PageLoadEvent::Finished => {
+                    navigation_finished(webview.app_handle(), webview.label(), 0, None);
+                }
+            }
             if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
                 let _ = webview.eval(fonts::current_script(webview.app_handle()));
                 let state = webview.app_handle().state::<TabState>();
@@ -443,6 +453,29 @@ async fn spawn_tab(
             });
             tauri::webview::NewWindowResponse::Deny
         });
+    #[cfg(target_os = "macos")]
+    let builder = builder.user_agent(native::DOCUMENT_USER_AGENT);
+    // WKWebView only enables downloads when a handler is registered. Its
+    // default destination is Downloads, with duplicate names resolved by Wry.
+    #[cfg(target_os = "macos")]
+    let builder = builder.on_download(|webview, event| {
+        let (name, message) = match event {
+            tauri::webview::DownloadEvent::Requested { destination, .. } => {
+                ("ui-notice", format!("开始下载：{}", destination.display()))
+            }
+            tauri::webview::DownloadEvent::Finished { success: true, .. } => {
+                ("ui-notice", "下载完成，请在下载文件夹查看".into())
+            }
+            tauri::webview::DownloadEvent::Finished { success: false, .. } => {
+                ("ui-error", "下载失败或已取消，请重试".into())
+            }
+            _ => return true,
+        };
+        let _ = webview
+            .app_handle()
+            .emit_to("ui", name, crate::UiError { message });
+        true
+    });
     // Start offscreen; the previous article stays visible during native creation.
     let created = window.add_child(
         builder,

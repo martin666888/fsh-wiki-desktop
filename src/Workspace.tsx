@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { IS_MACOS } from "./platform";
 import { errorMessage } from "./feedback";
 import { isSplit, type TabInfo, type TabsSnapshot } from "./tabs";
 import { useTabs } from "./useTabs";
@@ -233,10 +234,11 @@ export default function Workspace() {
     <div className="divider" role="separator" tabIndex={0} aria-label="调整左右文章宽度" aria-orientation="vertical"
       aria-valuemin={Math.round(viewport.minRatio * 100)} aria-valuemax={Math.round((1 - viewport.minRatio) * 100)}
       aria-valuenow={Math.round(viewport.leftWidth / Math.max(1, viewport.width - 6) * 100)} aria-valuetext={`左侧 ${Math.round(viewport.leftWidth / Math.max(1, viewport.width - 6) * 100)}%`}
-      title="拖动调整宽度，双击恢复均分；方向键微调，Enter 均分" style={{ left: viewport.leftWidth }}
+      title={IS_MACOS ? "点击后用方向键调整宽度，Enter 或双击恢复均分" : "拖动调整宽度，双击恢复均分；方向键微调，Enter 均分"} style={{ left: viewport.leftWidth }}
       onPointerDown={(event) => {
         if (event.button !== 0 || dragLock.current) return;
         event.preventDefault(); event.currentTarget.focus();
+        if (IS_MACOS) return;
         // Native capture receives mouse-up, so the WebView may never emit dblclick.
         const previous = dividerPress.current;
         dividerPress.current = { time: event.timeStamp, x: event.clientX, y: event.clientY };

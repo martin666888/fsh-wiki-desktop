@@ -67,7 +67,13 @@ function releaseFiles(release, withManifest) {
   };
   const selected = [assetByName(installer.name), assetByName(`${installer.name}.sig`)];
   assert.ok(selected[1].size <= 16 * 1024, "签名资源过大");
-  if (withManifest) selected.push(assetByName("latest.json"));
+  if (withManifest) {
+    const macInstallers = assets.filter((asset) => asset.name.endsWith(".dmg"));
+    assert.equal(macInstallers.length, 1, "Release 必须且只能有一个 Mac 通用安装包");
+    assert.ok(macInstallers[0].name.endsWith(`_${version.version}_universal.dmg`), "Mac 安装包名称与版本/架构不符");
+    assetByName(macInstallers[0].name);
+    selected.push(assetByName("latest.json"));
+  }
   if (withManifest) assert.ok(selected[2].size <= 64 * 1024, "更新清单过大");
   const directory = mkdtempSync(join(resolve(process.env.RUNNER_TEMP ?? tmpdir()), "feishu-release-"));
   for (const asset of selected) {

@@ -2,25 +2,31 @@
 //! Run: cargo run --manifest-path src-tauri/Cargo.toml --example download-smoke
 //! Add `-- --auto` to verify a real HTTP attachment, payload, and activity cleanup.
 //! File extensions exercise download names; payloads are test text, not Office files.
+#[cfg(windows)]
 #[path = "../src/downloads.rs"]
 mod downloads;
 
+#[cfg(windows)]
 use tauri::{Emitter, Listener, Manager};
 
+#[cfg(windows)]
 #[derive(serde::Serialize, Clone)]
 struct UiError {
     message: String,
 }
 
+#[cfg(windows)]
 fn report_ui_error(app: &tauri::AppHandle, message: String) {
     let _ = app.emit_to("ui", "ui-error", UiError { message });
 }
 
 // The harness has no idle scheduler; production uses this to restart its timer.
+#[cfg(windows)]
 mod power {
     pub(crate) fn navigation(_: &tauri::AppHandle, _: &str) {}
 }
 
+#[cfg(windows)]
 fn main() {
     let auto = std::env::args().any(|arg| arg == "--auto");
     let data = tempfile::tempdir().unwrap();
@@ -196,4 +202,10 @@ function save(ext){const a=document.createElement('a');a.href=URL.createObjectUR
         .run(tauri::generate_context!())
         .expect("native download regression failed");
     drop(data);
+}
+
+#[cfg(not(windows))]
+fn main() {
+    eprintln!("download-smoke requires Windows WebView2");
+    std::process::exit(1);
 }

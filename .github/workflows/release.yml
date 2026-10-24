@@ -17,6 +17,8 @@ jobs:
   release:
     runs-on: windows-latest
     timeout-minutes: 45
+    outputs:
+      release_id: ${{ steps.build.outputs.releaseId }}
     permissions:
       contents: write
     env:
@@ -71,8 +73,11 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: "飞书文档轻客户端 ${{ github.ref_name }}"
-          releaseBody: "由 GitHub Actions 自动构建并验证安装包、签名和更新清单。"
+          releaseName: "${{ github.ref_name }}"
+          releaseBody: |
+            - 新增 macOS 本地构建支持，可生成 .app 和 .dmg 安装包。
+            - 修复 Mac 登录后飞书云文档首页白屏。
+            - 适配 Mac 配置目录、下载提示及手动更新说明。
           releaseDraft: true
           prerelease: ${{ steps.metadata.outputs.prerelease }}
           includeUpdaterJson: false
@@ -84,8 +89,72 @@ jobs:
           RELEASE_ID: ${{ steps.build.outputs.releaseId }}
         run: npm run release:manifest
 
-      - name: Verify uploaded assets and publish
+  macos:
+    needs: release
+    runs-on: macos-14
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_ID: ${{ needs.release.outputs.release_id }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Cache Rust
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Validate frontend and Rust on Mac
+        run: |
+          npm run check
+          npm run check:rust
+
+      - name: Build universal Mac installer
+        run: npm run tauri -- build --ci --target universal-apple-darwin --bundles app,dmg -- --locked
+
+      - name: Verify and upload Mac installer to draft
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_ID: ${{ steps.build.outputs.releaseId }}
+        run: |
+          set -euo pipefail
+          bundle="src-tauri/target/universal-apple-darwin/release/bundle"
+          app="$bundle/macos/飞书文档轻客户端.app"
+          dmg="$bundle/dmg/飞书文档轻客户端_${RELEASE_TAG#v}_universal.dmg"
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Contents/Info.plist")" = "${RELEASE_TAG#v}"
+          lipo -verify_arch arm64 x86_64 "$app/Contents/MacOS/feishu-desktop"
+          codesign --verify --deep --strict "$app"
+          hdiutil verify "$dmg"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --jq '.draft')" = true
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --jq '.tag_name')" = "$RELEASE_TAG"
+          gh release upload "$RELEASE_TAG" "$dmg" --repo "$GITHUB_REPOSITORY" --clobber
+          # 重新下载上传后的映像；任一平台失败时保持草稿。
+          download_dir="$(mktemp -d)"
+          asset_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --jq '.assets[] | select(.name | endswith("_universal.dmg")) | .id')"
+          [[ "$asset_id" =~ ^[1-9][0-9]*$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" --header 'Accept: application/octet-stream' > "$download_dir/installer.dmg"
+          cmp "$dmg" "$download_dir/installer.dmg"
+          hdiutil verify "$download_dir/installer.dmg"
+
+      - name: Verify both platforms and publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run release:publish
