@@ -2,7 +2,7 @@ pub(crate) use crate::layout::TAB_BAR_HEIGHT;
 use crate::{
     data_dir, fonts,
     layout::{Layout, Pane, Viewport, PANE_BORDER, PANE_HEADER_HEIGHT},
-    native, navigation, report_ui_error, NO_DEFAULT_MENU_JS,
+    native, navigation, report_ui_error,
 };
 use serde::Serialize;
 use std::sync::{
@@ -364,7 +364,6 @@ async fn spawn_tab(
     let builder = WebviewBuilder::new(&label, WebviewUrl::External(parsed))
         .background_color(Color(255, 255, 255, 255))
         .data_directory(data_dir().join("webview"))
-        .initialization_script(NO_DEFAULT_MENU_JS)
         .initialization_script(fonts::current_script(app))
         .focused(false)
         .on_document_title_changed(|webview, title| {

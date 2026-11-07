@@ -75,9 +75,9 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: "${{ github.ref_name }}"
           releaseBody: |
-            - 新增 macOS 本地构建支持，可生成 .app 和 .dmg 安装包。
-            - 修复 Mac 登录后飞书云文档首页白屏。
-            - 适配 Mac 配置目录、下载提示及手动更新说明。
+            - 恢复文档页面的浏览器默认右键菜单。
+            - 支持在图片放大预览中使用“复制图片”“图片另存为”等原生菜单。
+            - 飞书页面自己的右键菜单继续由页面处理。
           releaseDraft: true
           prerelease: ${{ steps.metadata.outputs.prerelease }}
           includeUpdaterJson: false

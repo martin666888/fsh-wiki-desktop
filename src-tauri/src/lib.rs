@@ -18,7 +18,7 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
 const SETTINGS_W: f64 = 430.0;
 const SETTINGS_H: f64 = 480.0;
-// Suppress only the browser's default menu; Feishu's event handlers still run.
+// Suppress the browser menu on local app surfaces only; documents keep their default menu.
 const NO_DEFAULT_MENU_JS: &str =
     r#"document.addEventListener("contextmenu", function (e) { e.preventDefault(); }, true);"#;
 

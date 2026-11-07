@@ -10,7 +10,7 @@
 - 无边框主窗口支持拖动、双击最大化和窗口控制；设置窗口复用时可从最小化恢复，关闭主窗口会同时关闭设置窗口。
 - 西文、中文、代码字体分别设置，只改变本地显示，不修改文档。代码与图标子树单独保护；关闭字体后，已有标签重新导航同样清除覆盖样式。
 - 飞书/Lark 域的标准 HTTPS 链接在应用内打开；其他 HTTP/HTTPS 链接交给系统浏览器。带用户名密码的 URL、文件链接及未知协议不交给系统执行。
-- `target="_blank"` 由原生新窗口回调分流，内部文档打开为标签。WebView2 默认右键菜单被拦截，飞书页面自己的菜单继续由页面处理。
+- `target="_blank"` 由原生新窗口回调分流，内部文档打开为标签。文档页面保留浏览器默认右键菜单，具体菜单项取决于右键目标；飞书页面自己的菜单仍由页面处理。
 - 文档菜单“下载为”（Word / PDF / Markdown）及附件下载沿用 WebView2 的默认下载目录和下载行为；下载开始、完成和取消提示显示在标签栏右侧，5 秒后渐隐；悬停或键盘聚焦时保留，长路径以省略号显示，悬停可查看完整路径。完成提示使用实际保存路径（包含重名时自动调整的文件名），失败提示保留至手动关闭。下载期间该页面不进入闲置休眠，结束后重新计时。
 - 单实例：再次启动时还原并激活已有主窗口。开发版与安装版共用应用标识，会相互排斥。
 - 更新可自动检查、可选自动下载，安装始终需要点击「重启并安装」。
@@ -83,7 +83,7 @@ npm run check
 npm run check:rust
 ```
 
-- `check:project`：核对 npm、Cargo、Tauri、两份锁文件的版本，并检查 CSP、远程权限与签名发布配置。指定 tag 可运行 `npm run check:project -- --tag v0.1.17`。
+- `check:project`：核对 npm、Cargo、Tauri、两份锁文件的版本，并检查 CSP、远程权限与签名发布配置。指定 tag 可运行 `npm run check:project -- --tag v0.1.18`。
 - `check:signatures`：使用 Node 内置 `assert/crypto` 和公开签名向量验证 Ed/ED 兼容、bytes 与可信注释篡改拒绝、版本绑定和稳定版顺序，不使用私钥或可执行安装器。
 - `check`：依次执行上述脚本及 TypeScript/Vite 构建。
 - `check:rust`：依次运行 Rust 格式检查、锁定依赖检查、严格 Clippy 和 Rust 自带的单元测试。已有依赖齐全时，可单独运行 cargo check/clippy/test 并增加 `--offline`。
@@ -114,7 +114,7 @@ npm run build:mac
 `tauri.macos.conf.json` 会在 Mac 上自动合并到基础配置，生成当前机器架构的包，不改变 Windows 的 NSIS 发布流程。Apple Silicon Mac 的输出为：
 
 - `src-tauri/target/release/bundle/macos/飞书文档轻客户端.app`
-- `src-tauri/target/release/bundle/dmg/飞书文档轻客户端_0.1.17_aarch64.dmg`
+- `src-tauri/target/release/bundle/dmg/飞书文档轻客户端_0.1.18_aarch64.dmg`
 
 打开 DMG，将应用拖入「应用程序」后启动。后续修改重复检查和打包，再退出旧应用并替换即可；包内已嵌入前端资源，启动不依赖 Vite。Intel Mac 需在 Intel Mac 上构建，或在本机安装对应 Rust target 后构建通用包：
 
@@ -151,12 +151,12 @@ Tauri 2 的 NSIS 更新产物是安装器与签名，无需 v1 的 `.nsis.zip` �
 
 ## 发版流程
 
-推送 `v<SemVer>` tag 会触发 Release 工作流；这一步会对外发布，需要先完成本地检查并获得发版授权。版本与 tag 必须保持一致。Release 标题与 tag 相同，例如 `v0.1.17`。
+推送 `v<SemVer>` tag 会触发 Release 工作流；这一步会对外发布，需要先完成本地检查并获得发版授权。版本与 tag 必须保持一致。Release 标题与 tag 相同，例如 `v0.1.18`。
 
 准备新版本时同步修改 `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json`，再更新 `package-lock.json` 和 `src-tauri/Cargo.lock` 中对应的应用版本。不得只改 tag。同步更新 `.github/workflows/release.yml` 中的 `releaseBody` 为该版本的发布说明。先验证待发布版本，例如：
 
 ```powershell
-npm run check:project -- --tag v0.1.17
+npm run check:project -- --tag v0.1.18
 npm run check
 npm run check:rust
 ```
