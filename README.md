@@ -45,7 +45,8 @@
     ├── fonts.json         字体配置
     ├── updates.json       更新偏好
     ├── update\
-    │   └── pending.json   安装包、签名与版本组成的原子缓存
+    │   ├── pending.json   安装包、签名与版本组成的原子缓存
+    │   └── setup-<版本>.exe  验签后生成的 NSIS 安装包
     └── webview\           WebView2 缓存与登录状态
 ```
 
@@ -61,9 +62,9 @@ Mac 配置文件保存在 `~/Library/Application Support/com.webstudy.feishu-des
 
 1. 检查：正式构建启动时可自动检查，也可手动触发。已有有效待安装缓存时跳过启动自动检查，避免覆盖「已下载」。开发构建不自动查询线上更新。
 2. 下载：默认手动，可在「关于」中开启自动下载。进度累计所有数据块；总长度未知时显示已下载大小。检查和下载可以取消，检查总超时 30 秒，下载总超时 5 分钟，网络读取停滞也有超时。
-3. 安装：下载后将 bytes、原始签名、受保护版本及元数据一起保存。重启恢复与安装前均用内置公钥重新验签，并确认签名版本、缓存版本和当前版本关系；有效缓存支持完全离线安装。损坏、半文件、版本不匹配或不兼容缓存不会启动安装器。
+3. 安装：下载后将 bytes、原始签名、受保护版本及元数据一起保存，并在 `data/update/setup-<版本>.exe` 生成验签后的 NSIS 安装包。已有有效待安装缓存会在启动时生成或恢复缺失、损坏的 EXE，无需再次下载。重启恢复与安装前均用内置公钥重新验签，并确认签名版本、缓存版本和当前版本关系；有效缓存支持完全离线安装。损坏、半文件、版本不匹配或不兼容缓存不会启动安装器。
 
-点击「重启并安装」后进入安装中状态，阻止重复提交。当前产品只接受 NSIS 包；经验证的安装器写入随机临时目录，使用禁止改写/删除的读取句柄再次验签后启动。安装器成功启动才退出当前进程，随后由安装器重新打开应用。安装启动失败会保留错误反馈，不会把失败显示为成功。
+点击「重启并安装」后进入安装中状态，阻止重复提交。当前产品只接受 NSIS 包；启动 `data/update` 中的安装器前，使用禁止改写/删除的读取句柄再次验签。安装器成功启动才退出当前进程，随后由安装器重新打开应用。安装启动失败会保留错误反馈；EXE 与缓存不会在启动失败、取消安装或安装完成后自动删除。
 
 缓存包上限为 128 MiB。有效缓存不会因离线或检查失败消失；重新下载失败也不会覆盖原有完整包。更新服务地址配置在 `src-tauri/tauri.conf.json` 的 `plugins.updater.endpoints`，当前使用本仓库最新正式 Release 中的 `latest.json`。
 
@@ -83,7 +84,7 @@ npm run check
 npm run check:rust
 ```
 
-- `check:project`：核对 npm、Cargo、Tauri、两份锁文件的版本，并检查 CSP、远程权限与签名发布配置。指定 tag 可运行 `npm run check:project -- --tag v0.1.18`。
+- `check:project`：核对 npm、Cargo、Tauri、两份锁文件的版本，并检查 CSP、远程权限与签名发布配置。指定 tag 可运行 `npm run check:project -- --tag v0.1.19`。
 - `check:signatures`：使用 Node 内置 `assert/crypto` 和公开签名向量验证 Ed/ED 兼容、bytes 与可信注释篡改拒绝、版本绑定和稳定版顺序，不使用私钥或可执行安装器。
 - `check`：依次执行上述脚本及 TypeScript/Vite 构建。
 - `check:rust`：依次运行 Rust 格式检查、锁定依赖检查、严格 Clippy 和 Rust 自带的单元测试。已有依赖齐全时，可单独运行 cargo check/clippy/test 并增加 `--offline`。
@@ -114,7 +115,7 @@ npm run build:mac
 `tauri.macos.conf.json` 会在 Mac 上自动合并到基础配置，生成当前机器架构的包，不改变 Windows 的 NSIS 发布流程。Apple Silicon Mac 的输出为：
 
 - `src-tauri/target/release/bundle/macos/飞书文档轻客户端.app`
-- `src-tauri/target/release/bundle/dmg/飞书文档轻客户端_0.1.18_aarch64.dmg`
+- `src-tauri/target/release/bundle/dmg/飞书文档轻客户端_0.1.19_aarch64.dmg`
 
 打开 DMG，将应用拖入「应用程序」后启动。后续修改重复检查和打包，再退出旧应用并替换即可；包内已嵌入前端资源，启动不依赖 Vite。Intel Mac 需在 Intel Mac 上构建，或在本机安装对应 Rust target 后构建通用包：
 
@@ -151,12 +152,12 @@ Tauri 2 的 NSIS 更新产物是安装器与签名，无需 v1 的 `.nsis.zip` �
 
 ## 发版流程
 
-推送 `v<SemVer>` tag 会触发 Release 工作流；这一步会对外发布，需要先完成本地检查并获得发版授权。版本与 tag 必须保持一致。Release 标题与 tag 相同，例如 `v0.1.18`。
+推送 `v<SemVer>` tag 会触发 Release 工作流；这一步会对外发布，需要先完成本地检查并获得发版授权。版本与 tag 必须保持一致。Release 标题与 tag 相同，例如 `v0.1.19`。
 
 准备新版本时同步修改 `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json`，再更新 `package-lock.json` 和 `src-tauri/Cargo.lock` 中对应的应用版本。不得只改 tag。同步更新 `.github/workflows/release.yml` 中的 `releaseBody` 为该版本的发布说明。先验证待发布版本，例如：
 
 ```powershell
-npm run check:project -- --tag v0.1.18
+npm run check:project -- --tag v0.1.19
 npm run check
 npm run check:rust
 ```

@@ -1,6 +1,6 @@
 //! Durable, cancellable updates. Network discovery uses Tauri's updater; the
 //! Windows-only offline installer accepts a version-bound, signed NSIS package.
-use std::{fs, future::Future, path::Path, sync::Mutex, time::Duration};
+use std::{fs, future::Future, io::Read, path::Path, sync::Mutex, time::Duration};
 
 use base64::{engine::general_purpose::STANDARD, Engine};
 use futures_util::future::{select, Either};
@@ -282,6 +282,32 @@ fn read_cache(path: &Path) -> Result<Option<CachedPackage>, String> {
         .map_err(|_| "更新缓存不完整，请重新下载".into())
 }
 
+fn prepare_installer(
+    path: &Path,
+    cache: &CachedPackage,
+    current: &str,
+    key: &str,
+) -> Result<std::path::PathBuf, String> {
+    // Verify the cache before using its version in a filename or writing an EXE.
+    let bytes = verify_cache(cache, current, key)?;
+    let installer = path.with_file_name(format!("setup-{}.exe", cache.version));
+    match fs::File::open(&installer) {
+        Ok(file) => {
+            let mut existing = Vec::new();
+            file.take(bytes.len() as u64 + 1)
+                .read_to_end(&mut existing)
+                .map_err(|e| format!("无法准备更新：{e}"))?;
+            if existing == bytes {
+                return Ok(installer);
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("无法准备更新：{e}")),
+    }
+    crate::storage::atomic_write(&installer, &bytes)?;
+    Ok(installer)
+}
+
 pub fn restore_pending_on_boot(app: &AppHandle) {
     if !cfg!(windows) {
         return;
@@ -299,7 +325,12 @@ pub fn restore_pending_on_boot(app: &AppHandle) {
         {
             return Ok(None);
         }
-        verify_cache(&cache, &current, &configured_public_key(app)?)?;
+        prepare_installer(
+            &cache_path(),
+            &cache,
+            &current,
+            &configured_public_key(app)?,
+        )?;
         Ok::<_, String>(Some(cache))
     })();
     {
@@ -559,6 +590,12 @@ async fn download_update_inner(app: AppHandle, after_check: Option<u64>) -> Resu
                 }
                 let serialized = serde_json::to_vec(&cache).map_err(|e| e.to_string())?;
                 crate::storage::atomic_write(&cache_path(), &serialized)?;
+                prepare_installer(
+                    &cache_path(),
+                    &cache,
+                    &app.package_info().version.to_string(),
+                    &configured_public_key(&app)?,
+                )?;
                 inner.cached = Some(cache);
                 inner.active = None;
                 inner.status = inner.resting_status(None);
@@ -614,11 +651,16 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
             return Err("更新缓存已改变，请重新下载".into());
         }
         let key = configured_public_key(&app)?;
-        let bytes = verify_cache(&cache, &app.package_info().version.to_string(), &key)?;
-        Ok::<_, String>((cache, bytes, key))
+        let path = prepare_installer(
+            &cache_path(),
+            &cache,
+            &app.package_info().version.to_string(),
+            &key,
+        )?;
+        Ok::<_, String>((cache, path, key))
     })();
     let result = match verified {
-        Ok((cache, bytes, key)) => launch_verified_nsis(&app, &cache, &bytes, &key),
+        Ok((cache, path, key)) => launch_verified_nsis(&app, &cache, &path, &key),
         Err(message) => {
             let state = app.state::<UpdateState>();
             state.0.lock().unwrap().cached = None;
@@ -632,47 +674,44 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
 }
 
 #[cfg(windows)]
+fn open_verified_installer(
+    path: &Path,
+    cache: &CachedPackage,
+    key: &str,
+) -> Result<fs::File, String> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let mut guard = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(1)
+        .open(path)
+        .map_err(|e| e.to_string())?;
+    let mut actual = Vec::new();
+    (&mut guard)
+        .take(MAX_PACKAGE_BYTES as u64 + 1)
+        .read_to_end(&mut actual)
+        .map_err(|e| e.to_string())?;
+    verify_signed_bytes(&actual, &cache.version, &cache.signature, key)?;
+    Ok(guard)
+}
+
+#[cfg(windows)]
 fn launch_verified_nsis(
     app: &AppHandle,
     cache: &CachedPackage,
-    bytes: &[u8],
+    path: &Path,
     key: &str,
 ) -> Result<(), String> {
-    use std::{
-        ffi::OsStr,
-        io::{Read, Write},
-        os::windows::{ffi::OsStrExt, fs::OpenOptionsExt},
-    };
+    use std::{ffi::OsStr, os::windows::ffi::OsStrExt};
     use windows_sys::Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOW};
 
     // The updater's Update cannot be reconstructed offline (its context is
     // private). This product ships only NSIS, so mirror its native NSIS launch
     // contract after independently verifying the durable signed package.
-    let dir = tempfile::Builder::new()
-        .prefix("feishu-verified-update-")
-        .tempdir()
-        .map_err(|e| format!("无法创建安装临时目录：{e}"))?;
-    let path = dir.path().join("setup.exe");
-    {
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-            .map_err(|e| e.to_string())?;
-        file.write_all(bytes).map_err(|e| e.to_string())?;
-        file.sync_all().map_err(|e| e.to_string())?;
-    }
     // Keep a read-only handle that denies writes/deletion until ShellExecute
     // succeeds. Reverify through that handle so the launched file is the exact
-    // signed package, even if another process raced the temporary write.
-    let mut guard = fs::OpenOptions::new()
-        .read(true)
-        .share_mode(1)
-        .open(&path)
-        .map_err(|e| e.to_string())?;
-    let mut actual = Vec::new();
-    guard.read_to_end(&mut actual).map_err(|e| e.to_string())?;
-    verify_signed_bytes(&actual, &cache.version, &cache.signature, key)?;
+    // signed package, even if the visible EXE was changed after preparation.
+    let _guard = open_verified_installer(path, cache, key)?;
     let mut parameters = std::ffi::OsString::from("/P /UPDATE /R /ARGS");
     for arg in app.env().args_os.iter().skip(1) {
         parameters.push(" ");
@@ -698,7 +737,6 @@ fn launch_verified_nsis(
             result as isize
         ));
     }
-    let _retained = dir.keep();
     app.cleanup_before_exit();
     std::process::exit(0);
 }
@@ -732,7 +770,7 @@ fn escape_nsis_arg(arg: &std::ffi::OsStr) -> std::ffi::OsString {
 }
 
 #[cfg(not(windows))]
-fn launch_verified_nsis(_: &AppHandle, _: &CachedPackage, _: &[u8], _: &str) -> Result<(), String> {
+fn launch_verified_nsis(_: &AppHandle, _: &CachedPackage, _: &Path, _: &str) -> Result<(), String> {
     Err("此应用仅支持 Windows NSIS 更新".into())
 }
 
@@ -789,6 +827,83 @@ mod tests {
             .contains("版本不一致"));
         assert!(verify_cache(&cache, "2.0.0", KEY).is_err());
         assert!(verify_cache(&cache, "3.0.0", KEY).is_err());
+    }
+
+    #[test]
+    fn cached_updates_export_and_restore_their_installer() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pending.json");
+        let cache_bytes = serde_json::to_vec(&fixture()).unwrap();
+        fs::write(&path, &cache_bytes).unwrap();
+        let cache = read_cache(&path).unwrap().unwrap();
+        let expected = verify_cache(&cache, "1.0.0", KEY).unwrap();
+        let installer = prepare_installer(&path, &cache, "1.0.0", KEY).unwrap();
+        assert_eq!(installer, dir.path().join("setup-2.0.0.exe"));
+        assert_eq!(fs::read(&installer).unwrap(), expected);
+
+        fs::remove_file(&installer).unwrap();
+        prepare_installer(&path, &cache, "1.0.0", KEY).unwrap();
+        assert_eq!(fs::read(&installer).unwrap(), expected);
+        fs::write(&installer, b"incomplete or modified").unwrap();
+        prepare_installer(&path, &cache, "1.0.0", KEY).unwrap();
+        assert_eq!(fs::read(&installer).unwrap(), expected);
+        assert_eq!(fs::read(&path).unwrap(), cache_bytes);
+    }
+
+    #[test]
+    fn invalid_cache_cannot_create_or_replace_an_installer() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pending.json");
+        let cache = fixture();
+        let installer = prepare_installer(&path, &cache, "1.0.0", KEY).unwrap();
+        let expected = fs::read(&installer).unwrap();
+        let mut changed = cache.clone();
+        changed.package_base64 = STANDARD.encode(b"tampered");
+        assert!(prepare_installer(&path, &changed, "1.0.0", KEY).is_err());
+        changed = cache;
+        changed.version = "../../outside".into();
+        assert!(prepare_installer(&path, &changed, "1.0.0", KEY).is_err());
+        assert_eq!(fs::read(&installer).unwrap(), expected);
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn failed_preparation_keeps_cached_update_and_existing_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pending.json");
+        let cache = fixture();
+        let cache_bytes = serde_json::to_vec(&cache).unwrap();
+        fs::write(&path, &cache_bytes).unwrap();
+        let blocked = dir.path().join("setup-2.0.0.exe");
+        fs::create_dir(&blocked).unwrap();
+        fs::write(blocked.join("keep"), b"existing data").unwrap();
+
+        assert!(prepare_installer(&path, &cache, "1.0.0", KEY).is_err());
+        assert_eq!(fs::read(&path).unwrap(), cache_bytes);
+        assert_eq!(fs::read(blocked.join("keep")).unwrap(), b"existing data");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn visible_installer_is_verified_and_locked_before_launch() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pending.json");
+        let cache = fixture();
+        let installer = prepare_installer(&path, &cache, "1.0.0", KEY).unwrap();
+        let guard = open_verified_installer(&installer, &cache, KEY).unwrap();
+        assert!(fs::write(&installer, b"modified").is_err());
+        assert!(fs::remove_file(&installer).is_err());
+        assert_eq!(
+            prepare_installer(&path, &cache, "1.0.0", KEY).unwrap(),
+            installer
+        );
+        drop(guard);
+        assert!(installer.is_file());
+
+        fs::write(&installer, b"modified after download").unwrap();
+        assert!(open_verified_installer(&installer, &cache, KEY).is_err());
+        prepare_installer(&path, &cache, "1.0.0", KEY).unwrap();
+        assert!(open_verified_installer(&installer, &cache, KEY).is_ok());
     }
 
     #[test]

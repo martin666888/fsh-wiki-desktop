@@ -75,9 +75,8 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: "${{ github.ref_name }}"
           releaseBody: |
-            - 恢复文档页面的浏览器默认右键菜单。
-            - 支持在图片放大预览中使用“复制图片”“图片另存为”等原生菜单。
-            - 飞书页面自己的右键菜单继续由页面处理。
+            - 更新下载完成后，将已验证的 EXE 保存在 data/update 目录。
+            - 支持从有效缓存恢复缺失或损坏的 EXE，安装失败后保留文件。
           releaseDraft: true
           prerelease: ${{ steps.metadata.outputs.prerelease }}
           includeUpdaterJson: false
